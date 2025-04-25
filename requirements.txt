@@ -1,0 +1,7 @@
+agency-swarm
+fastapi
+uvicorn[standard]
+websockets
+python-dotenv
+python-jose[cryptography]  # For JWT
+passlib[bcrypt]          # For potential password hashing (good practice) 

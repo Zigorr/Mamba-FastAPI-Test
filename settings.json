@@ -1,0 +1,155 @@
+[
+    {
+        "id": "asst_tIeN1uXiD0YJbIqOndUysJjX",
+        "created_at": 1745597215,
+        "description": "Manages client interaction, task planning, and saving client data.",
+        "instructions": "# Agency Description\n\nThis agency facilitates basic client interactions, focusing on capturing and retrieving client names using shared state.\n\n# Mission Statement\n\nTo efficiently manage and recall client identification data through collaborative agent tasks.\n\n# Operating Environment\n\nThe agency primarily operates within a FastAPI application instance, potentially interacting with users via a WebSocket connection. It utilizes shared state for internal data persistence during a session and integrates with MongoDB for long-term thread and settings storage. \n\n# Agent Role\n\nYou are the CEO of the Client Management Agency. Your primary responsibility is to interact with the user (client), understand their needs, and manage the workflow within the agency. You are the main point of contact.\n\n# Goals\n\n- Greet the user and understand their request.\n- If the user provides their name or company name, use the `SaveClientData` tool to store it.\n- Delegate tasks to the `Worker` agent if information retrieval is needed.\n- Ensure client requests are handled efficiently.\n\n# Process Workflow\n\n1.  Receive the initial message from the user.\n2.  Engage in conversation to understand the client's needs. Ask for their name if appropriate.\n3.  If the client provides their name, use the `SaveClientData` tool immediately to record it.\n4.  If the task requires recalling previously stored client data, communicate with the `Worker` agent to retrieve this information.\n5.  Relay the information obtained from the `Worker` (or from your own tools) back to the user.\n\n",
+        "metadata": {},
+        "model": "gpt-4o",
+        "name": "CEO",
+        "object": "assistant",
+        "tools": [
+            {
+                "function": {
+                    "name": "SaveClientData",
+                    "description": "Saves the client's name to the shared state. This tool should be used\nwhen the client's name needs to be stored for later retrieval by other agents.",
+                    "parameters": {
+                        "properties": {
+                            "client_name": {
+                                "description": "The name of the client to be saved.",
+                                "title": "Client Name",
+                                "type": "string"
+                            }
+                        },
+                        "required": [
+                            "client_name"
+                        ],
+                        "type": "object"
+                    },
+                    "strict": false
+                },
+                "type": "function"
+            },
+            {
+                "function": {
+                    "name": "SendMessage",
+                    "description": "Correctly extracted `SendMessage` with all the required parameters with correct types",
+                    "parameters": {
+                        "$defs": {
+                            "recipient": {
+                                "const": "Worker",
+                                "enum": [
+                                    "Worker"
+                                ],
+                                "title": "recipient",
+                                "type": "string"
+                            }
+                        },
+                        "properties": {
+                            "recipient": {
+                                "allOf": [
+                                    {
+                                        "$ref": "#/$defs/recipient"
+                                    }
+                                ],
+                                "description": "Worker: Retrieves client data from shared state when requested.\n"
+                            },
+                            "my_primary_instructions": {
+                                "description": "Please repeat your primary instructions step-by-step, including both completed and the following next steps that you need to perform. For multi-step, complex tasks, first break them down into smaller steps yourself. Then, issue each step individually to the recipient agent via the message parameter. Each identified step should be sent in a separate message. Keep in mind that the recipient agent does not have access to these instructions. You must include recipient agent-specific instructions in the message or in the additional_instructions parameters.",
+                                "title": "My Primary Instructions",
+                                "type": "string"
+                            },
+                            "message": {
+                                "description": "Specify the task required for the recipient agent to complete. Focus on clarifying what the task entails, rather than providing exact instructions. Make sure to inlcude all the relevant information from the conversation needed to complete the task.",
+                                "title": "Message",
+                                "type": "string"
+                            },
+                            "message_files": {
+                                "anyOf": [
+                                    {
+                                        "items": {
+                                            "type": "string"
+                                        },
+                                        "type": "array"
+                                    },
+                                    {
+                                        "type": "null"
+                                    }
+                                ],
+                                "default": null,
+                                "description": "A list of file IDs to be sent as attachments to this message. Only use this if you have the file ID that starts with 'file-'.",
+                                "examples": [
+                                    "file-1234",
+                                    "file-5678"
+                                ],
+                                "title": "Message Files"
+                            },
+                            "additional_instructions": {
+                                "anyOf": [
+                                    {
+                                        "type": "string"
+                                    },
+                                    {
+                                        "type": "null"
+                                    }
+                                ],
+                                "default": null,
+                                "description": "Additional context or instructions from the conversation needed by the recipient agent to complete the task.",
+                                "title": "Additional Instructions"
+                            }
+                        },
+                        "required": [
+                            "message",
+                            "my_primary_instructions",
+                            "recipient"
+                        ],
+                        "type": "object"
+                    },
+                    "strict": false
+                },
+                "type": "function"
+            }
+        ],
+        "response_format": "auto",
+        "temperature": 0.3,
+        "tool_resources": {
+            "code_interpreter": null,
+            "file_search": null
+        },
+        "top_p": 1.0,
+        "reasoning_effort": null
+    },
+    {
+        "id": "asst_FUjdZOW8ZxDOpYfEVrDKbjv9",
+        "created_at": 1745597215,
+        "description": "Retrieves client data from shared state when requested.",
+        "instructions": "# Agency Description\n\nThis agency facilitates basic client interactions, focusing on capturing and retrieving client names using shared state.\n\n# Mission Statement\n\nTo efficiently manage and recall client identification data through collaborative agent tasks.\n\n# Operating Environment\n\nThe agency primarily operates within a FastAPI application instance, potentially interacting with users via a WebSocket connection. It utilizes shared state for internal data persistence during a session and integrates with MongoDB for long-term thread and settings storage. \n\n# Agent Role\n\nYou are the Worker agent within the Client Management Agency. Your main function is to retrieve previously stored client data when requested by the CEO.\n\n# Goals\n\n- Respond to requests from the CEO.\n- Use the `RecallClientData` tool to fetch the client's name from shared state.\n- Report the retrieved data (or indicate if it's not found) back to the CEO.\n\n# Process Workflow\n\n1.  Receive a request from the CEO to recall client data.\n2.  Use the `RecallClientData` tool to access the shared state and retrieve the value associated with the `client_name` key.\n3.  Communicate the result (the client's name or a 'not found' message) back to the CEO.\n\n",
+        "metadata": {},
+        "model": "gpt-4o",
+        "name": "Worker",
+        "object": "assistant",
+        "tools": [
+            {
+                "function": {
+                    "name": "RecallClientData",
+                    "description": "Recalls the client's name from the shared state. Use this tool when you need\nto retrieve the client name previously saved by another agent.",
+                    "parameters": {
+                        "properties": {},
+                        "type": "object",
+                        "required": []
+                    },
+                    "strict": false
+                },
+                "type": "function"
+            }
+        ],
+        "response_format": "auto",
+        "temperature": 0.3,
+        "tool_resources": {
+            "code_interpreter": null,
+            "file_search": null
+        },
+        "top_p": 1.0,
+        "reasoning_effort": null
+    }
+]
