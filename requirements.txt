@@ -4,4 +4,11 @@ uvicorn[standard]
 websockets
 python-dotenv
 python-jose[cryptography]  # For JWT
-passlib[bcrypt]          # For potential password hashing (good practice) 
+passlib[bcrypt]          # For potential password hashing (good practice)
+sqlalchemy               # For ORM and database operations
+pydantic[email]          # For data validation including EmailStr
+certifi                  # For SSL certificates
+jinja2                   # For templates
+email-validator          # Required for pydantic email validation
+python-multipart         # For form data handling
+asyncio                  # For async operations 

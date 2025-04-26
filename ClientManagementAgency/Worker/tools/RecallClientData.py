@@ -17,7 +17,13 @@ class RecallClientData(BaseTool):
         Returns the client name if found, or a message indicating it was not found.
         """
         try:
+            # Get conversation ID if available in shared state
+            conversation_id = "unknown"
+            if hasattr(self._shared_state, 'get'):
+                conversation_id = self._shared_state.get("__conversation_id") or "unknown"
+                
             client_name = self._shared_state.get("client_name")
+            print(f"Internal Tool (Conv: {conversation_id}): Retrieved client name: '{client_name}'")
             if client_name:
                 return f"Retrieved client name: '{client_name}'"
             else:

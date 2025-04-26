@@ -20,9 +20,24 @@ class SaveClientData(BaseTool):
         under the key 'client_name'.
         """
         try:
+            # Get conversation ID if available in shared state
+            conversation_id = "unknown"
+            if hasattr(self._shared_state, 'get'):
+                conversation_id = self._shared_state.get("__conversation_id") or "unknown"
+                
+            # Print before setting 
+            print(f"Internal Tool Debug (Conv: {conversation_id}) - Before setting: shared_state data = {getattr(self._shared_state, 'data', {})}")
+            
+            # Set the client name
             self._shared_state.set("client_name", self.client_name)
+            
+            # Print after setting
+            print(f"Internal Tool Debug (Conv: {conversation_id}) - After setting: shared_state data = {getattr(self._shared_state, 'data', {})}")
+            
+            print(f"Internal Tool: Successfully saved client name '{self.client_name}' to shared state for conversation {conversation_id}.")
             return f"Successfully saved client name '{self.client_name}' to shared state."
         except Exception as e:
+            print(f"Internal Tool Error: {e}")
             return f"Error saving client name to shared state: {e}"
 
 if __name__ == "__main__":

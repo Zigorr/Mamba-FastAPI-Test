@@ -1,0 +1,171 @@
+import logging
+from datetime import datetime, timedelta
+from typing import Optional, List
+from jose import JWTError, jwt
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+from passlib.context import CryptContext
+from sqlalchemy.orm import Session
+from pydantic import BaseModel
+
+from database import get_db
+from models import User
+from dto import UserDto, CreateUserDto, TokenData, LoginDto
+from repositories import UserRepository
+from auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Security configuration
+SECRET_KEY = "your-secret-key"  # In production, use a secure random key
+ALGORITHM = "HS256"
+
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+def register_user(user_data: CreateUserDto, db: Session) -> UserDto:
+    """Register a new user."""
+    # Initialize repository
+    user_repo = UserRepository(db)
+    
+    # Check if username already exists
+    if user_repo.get_by_username(user_data.username):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username already registered"
+        )
+    
+    # Create hashed password
+    hashed_password = pwd_context.hash(user_data.password)
+    
+    # Create user using repository
+    user = user_repo.create_from_dto(user_data, hashed_password)
+    
+    # Return user DTO
+    return UserDto(
+        username=user.username,
+        email=user.email,
+        first_name=user.first_name,
+        last_name=user.last_name
+    )
+
+def authenticate_user(username: str, password: str, db: Session) -> Optional[User]:
+    """Authenticate a user by username and password."""
+    # Initialize repository
+    user_repo = UserRepository(db)
+    
+    # Get user
+    user = user_repo.get_by_username(username)
+    
+    # Verify password if user exists
+    if not user or not pwd_context.verify(password, user.password):
+        return None
+    
+    return user
+
+def get_user_by_username(username: str, db: Session) -> Optional[UserDto]:
+    """Get a user by username."""
+    # Initialize repository
+    user_repo = UserRepository(db)
+    
+    # Get user
+    user = user_repo.get_by_username(username)
+    
+    if not user:
+        return None
+    
+    # Return user DTO
+    return UserDto(
+        username=user.username,
+        email=user.email,
+        first_name=user.first_name,
+        last_name=user.last_name
+    )
+
+def get_users(db: Session, skip: int = 0, limit: int = 100) -> List[UserDto]:
+    """Get a list of users."""
+    # Initialize repository
+    user_repo = UserRepository(db)
+    
+    # Get users
+    users = user_repo.get_all()
+    
+    # Convert to DTOs
+    return [
+        UserDto(
+            username=user.username,
+            email=user.email,
+            first_name=user.first_name,
+            last_name=user.last_name
+        )
+        for user in users
+    ]
+
+def update_user(username: str, user_data: dict, db: Session) -> Optional[UserDto]:
+    """Update a user's information."""
+    # Initialize repository
+    user_repo = UserRepository(db)
+    
+    # Get user
+    user = user_repo.get_by_username(username)
+    
+    if not user:
+        return None
+    
+    # Update user
+    updated_user = user_repo.update(user, user_data)
+    
+    # Return user DTO
+    return UserDto(
+        username=updated_user.username,
+        email=updated_user.email,
+        first_name=updated_user.first_name,
+        last_name=updated_user.last_name
+    )
+
+def delete_user(username: str, db: Session) -> bool:
+    """Delete a user."""
+    # Initialize repository
+    user_repo = UserRepository(db)
+    
+    # Delete user
+    return user_repo.delete(username)
+
+async def login_user(login_data: LoginDto, db: Session) -> dict:
+    """Authenticate user and return JWT token."""
+    # Initialize repository
+    user_repo = UserRepository(db)
+    
+    # Get user
+    user = user_repo.get_by_username(login_data.username)
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Verify password
+    if not pwd_context.verify(login_data.password, user.password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    userDto = UserDto(
+        username=user.username,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        email=user.email
+    )
+    # Create access token
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+    
+    return {"access_token": access_token, "token_type": "bearer", "user": userDto} 
