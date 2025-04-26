@@ -1,7 +1,6 @@
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status, Query
 from fastapi.responses import HTMLResponse
-from fastapi.security import OAuth2PasswordRequestForm
 import os
 from dotenv import load_dotenv
 import asyncio
@@ -9,11 +8,18 @@ import logging
 import pickle
 from typing import Dict
 import certifi
+from sqlalchemy.orm import Session
+from passlib.context import CryptContext
 
 # State and Auth
 import state
 import auth
 from auth import get_current_user, create_access_token
+
+# Database and Models
+from database import get_db, engine, SessionLocal
+from models import Base, User
+from dto import CreateUserDto, UserDto, LoginDto
 
 # Agency
 from agency_swarm import Agency
@@ -27,7 +33,17 @@ os.environ["SSL_CERT_FILE"] = certifi.where()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+app = FastAPI(
+    title="Mamba FastAPI Chat",
+    description="A FastAPI application with WebSocket chat and user authentication",
+    version="1.0.0"
+)
+
+# Create database tables
+Base.metadata.create_all(bind=engine)
 
 # Simple HTML page for WebSocket client
 html = """
@@ -40,9 +56,23 @@ html = """
         <h2>Login</h2>
         <form action="" onsubmit="loginUser(event)">
             <label>Username: <input type="text" id="username" autocomplete="off" value="testuser"/></label>
+            <label>Password: <input type="password" id="password" autocomplete="off"/></label>
             <button>Login</button>
         </form>
         <div id="loginStatus"></div>
+    </div>
+
+    <div id="registerSection">
+        <h2>Register</h2>
+        <form action="" onsubmit="registerUser(event)">
+            <label>Username: <input type="text" id="regUsername" autocomplete="off"/></label><br>
+            <label>First Name: <input type="text" id="firstName" autocomplete="off"/></label><br>
+            <label>Last Name: <input type="text" id="lastName" autocomplete="off"/></label><br>
+            <label>Email: <input type="email" id="email" autocomplete="off"/></label><br>
+            <label>Password: <input type="password" id="regPassword" autocomplete="off"/></label><br>
+            <button>Register</button>
+        </form>
+        <div id="registerStatus"></div>
     </div>
 
     <div id="chatSection" style="display: none;">
@@ -61,9 +91,38 @@ html = """
         var ws = null;
         var currentToken = null;
 
+        async function registerUser(event) {
+            event.preventDefault();
+            const registerStatus = document.getElementById("registerStatus");
+            try {
+                const response = await fetch('/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        username: document.getElementById("regUsername").value,
+                        first_name: document.getElementById("firstName").value,
+                        last_name: document.getElementById("lastName").value,
+                        email: document.getElementById("email").value,
+                        password: document.getElementById("regPassword").value
+                    })
+                });
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || `Registration failed: ${response.statusText}`);
+                }
+                registerStatus.textContent = "Registration successful! You can now login.";
+            } catch (error) {
+                registerStatus.textContent = `Registration error: ${error.message}`;
+                console.error("Registration error:", error);
+            }
+        }
+
         async function loginUser(event) {
             event.preventDefault();
             const username = document.getElementById("username").value;
+            const password = document.getElementById("password").value;
             const loginStatus = document.getElementById("loginStatus");
             try {
                 const response = await fetch('/login', {
@@ -71,7 +130,7 @@ html = """
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded',
                     },
-                    body: `username=${encodeURIComponent(username)}&password=` // Sending dummy password
+                    body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`
                 });
                 if (!response.ok) {
                     const errorData = await response.json();
@@ -82,6 +141,7 @@ html = """
                 loginStatus.textContent = "Login successful!";
                 document.getElementById("tokenDisplay").textContent = currentToken;
                 document.getElementById("loginSection").style.display = "none";
+                document.getElementById("registerSection").style.display = "none";
                 document.getElementById("chatSection").style.display = "block";
             } catch (error) {
                 loginStatus.textContent = `Login error: ${error.message}`;
@@ -189,47 +249,96 @@ def save_settings(conversation_id: str, settings: list):
     state.settings[conversation_id] = pickle.dumps(settings)
 
 def load_shared_state(conversation_id: str):
+    logger.info(f"Loading shared state for conversation {conversation_id}: {state.shared_states.get(conversation_id, {})}")
     return state.shared_states.get(conversation_id, {})
 
 def save_shared_state(conversation_id: str, shared_state: dict):
+    logger.info(f"Saving shared state for conversation {conversation_id}: {shared_state}")
     state.shared_states[conversation_id] = shared_state
 
-@app.get("/")
+@app.get("/", tags=["UI"])
 async def get():
     return HTMLResponse(html)
 
-@app.post("/login")
-async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
-    # Simple login: checks if username exists. No password check.
-    user = state.users.get(form_data.username)
-    if not user:
+@app.post("/register", response_model=UserDto, tags=["Authentication"])
+async def register_user(user_data: CreateUserDto, db: Session = Depends(get_db)):
+    # Check if username already exists
+    existing_user = db.query(User).filter(User.username == user_data.username).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username already registered"
+        )
+    
+    # Check if email already exists
+    existing_email = db.query(User).filter(User.email == user_data.email).first()
+    if existing_email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered"
+        )
+    
+    # Create new user
+    hashed_password = pwd_context.hash(user_data.password)
+    db_user = User(
+        username=user_data.username,
+        first_name=user_data.first_name,
+        last_name=user_data.last_name,
+        email=user_data.email,
+        password=hashed_password
+    )
+    
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    
+    return UserDto(
+        username=db_user.username,
+        first_name=db_user.first_name,
+        last_name=db_user.last_name,
+        email=db_user.email
+    )
+
+@app.post("/login", tags=["Authentication"])
+async def login_for_access_token(
+    login_data: LoginDto,
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(User.username == login_data.username).first()
+    if not user or not pwd_context.verify(login_data.password, user.password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username",
+            detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    access_token = create_access_token(data={"sub": user["username"]})
-    return {"access_token": access_token, "token_type": "bearer"}
+    userDto = UserDto(
+        username=user.username,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        email=user.email
+    )
+    access_token = create_access_token(data={"sub": user.username})
+    return {"access_token": access_token, "token_type": "bearer", "user": userDto}
 
 @app.websocket("/chat/{conversation_id}")
 async def websocket_endpoint(
     websocket: WebSocket, 
     conversation_id: str,
-    token: str = Query(...), # Get token from query param
-    # current_user: Dict = Depends(get_current_user) # Apply auth dependency
+    token: str = Query(..., description="JWT token for authentication"),
 ):
     # Manual token verification for WebSocket
+    db = SessionLocal()
     try:
-        current_user = await get_current_user(token=token)
-        logger.info(f"User {current_user['username']} authenticated for conversation {conversation_id}")
+        current_user = await get_current_user(token=token, db=db)
+        logger.info(f"User {current_user.username} authenticated for conversation {conversation_id}")
     except HTTPException as e:
         await websocket.accept() # Accept before closing with code
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason=f"Authentication failed: {e.detail}")
         logger.warning(f"WebSocket authentication failed for conv {conversation_id}: {e.detail}")
+        db.close()
         return
-    
     await websocket.accept()
-    logger.info(f"WebSocket connection accepted for user {current_user['username']} and conversation_id: {conversation_id}")
+    logger.info(f"WebSocket connection accepted for user {current_user.username} and conversation_id: {conversation_id}")
 
     agency = None
     # Try to load existing conversation state
@@ -253,6 +362,7 @@ async def websocket_endpoint(
             )
 
             for k, v in load_shared_state(conversation_id).items():
+                
                 agency.shared_state.set(k, v)
 
             logger.info(f"Loaded existing agency state for conversation {conversation_id}")
@@ -293,14 +403,14 @@ async def websocket_endpoint(
     # --- Agency Interaction Logic --- 
     async def on_message_callback(msg: str):
         """Callback function to send agency messages to WebSocket client."""
-        logger.info(f"Sending message to client {current_user['username']} for conversation {conversation_id}: {msg[:100]}...")
+        logger.info(f"Sending message to client {current_user.username} for conversation {conversation_id}: {msg[:100]}...")
         await websocket.send_text(msg)
 
     # Start receiving messages from the client
     try:
         while True:
             data = await websocket.receive_text()
-            logger.info(f"Received message from client {current_user['username']} for conversation {conversation_id}: {data}")
+            logger.info(f"Received message from client {current_user.username} for conversation {conversation_id}: {data}")
 
             # Use agency.get_completion_async for async handling
             # Run the completion and wait for it before pickling the updated state
@@ -319,6 +429,7 @@ async def websocket_endpoint(
             await on_message_callback(completion_result)
 
             # Pickle the updated agency state after completion
+            
             try:
                 save_shared_state(conversation_id, agency.shared_state.data)
                 logger.info(f"Saved updated agency state for conversation {conversation_id}")
@@ -328,7 +439,7 @@ async def websocket_endpoint(
                 await websocket.send_text(f"System Error: Could not save conversation state.")
 
     except WebSocketDisconnect:
-        logger.info(f"WebSocket disconnected for user {current_user['username']}, conversation_id: {conversation_id}")
+        logger.info(f"WebSocket disconnected for user {current_user.username}, conversation_id: {conversation_id}")
         # State is already saved after each message, final save might be redundant
     except Exception as e:
         logger.error(f"Error during WebSocket communication for {conversation_id}: {e}", exc_info=True)
@@ -344,7 +455,8 @@ async def websocket_endpoint(
                 logger.info(f"Final state save attempt for conversation {conversation_id} on disconnect/error.")
              except Exception as e:
                 logger.error(f"Error during final state pickle for {conversation_id}: {e}")
-        logger.info(f"Closing WebSocket connection handler for user {current_user['username']}, conversation_id: {conversation_id}")
+        logger.info(f"Closing WebSocket connection handler for user {current_user.username}, conversation_id: {conversation_id}")
+        db.close()
 
 if __name__ == "__main__":
     print("Starting FastAPI server...")

@@ -4,14 +4,16 @@ from jose import JWTError, jwt
 from datetime import datetime, timedelta, timezone
 import os
 from dotenv import load_dotenv
-from state import users # Import simple user store
+from sqlalchemy.orm import Session
+from database import get_db
+from models import User
 
 load_dotenv()
 
 # Configuration (load secret key from environment)
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = 100
 
 if not SECRET_KEY:
     raise ValueError("SECRET_KEY not set in environment variables or .env file")
@@ -44,7 +46,7 @@ def verify_token(token: str, credentials_exception):
 # Use APIKeyQuery to read token from query parameter named 'token' for WebSocket
 api_key_query = APIKeyQuery(name="token", auto_error=False)
 
-async def get_current_user(token: str = Depends(api_key_query)):
+async def get_current_user(token: str = Depends(api_key_query), db: Session = Depends(get_db)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -57,7 +59,7 @@ async def get_current_user(token: str = Depends(api_key_query)):
         )
     
     token_data = verify_token(token, credentials_exception)
-    user = users.get(token_data["username"])
+    user = db.query(User).filter(User.username == token_data["username"]).first()
     if user is None:
         raise credentials_exception
-    return user # Return the user dictionary 
+    return user # Return the user ORM object 
