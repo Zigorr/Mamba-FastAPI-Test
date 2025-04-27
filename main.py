@@ -1,5 +1,5 @@
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status, Query
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status, Query, Header
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 import os
@@ -15,7 +15,7 @@ from passlib.context import CryptContext
 # State and Auth
 import state
 import auth
-from auth import get_current_user, create_access_token, api_key_query
+from auth import get_current_user, create_access_token, get_token_header
 
 # Database and Models
 from database import get_db, engine, SessionLocal
@@ -299,7 +299,7 @@ async def login_for_access_token(
 async def chat_endpoint(
     conversation_id: str,
     request: dict,
-    token: str = Depends(api_key_query),
+    token: str = Depends(get_token_header),
     db: Session = Depends(get_db)
 ):
     # Verify token and get current user
@@ -368,7 +368,6 @@ async def chat_endpoint(
 
         for k, v in load_shared_state(conversation_id).items():
             agency.shared_state.set(k, v)
-
         logger.info(f"Created new agency instance for conversation {conversation_id}")
         try:
             save_shared_state(conversation_id, agency.shared_state.data)
@@ -399,5 +398,4 @@ if __name__ == "__main__":
     print("Ensure .env file has OPENAI_API_KEY and SECRET_KEY")
     print(f"Default user: testuser (no password needed)")
     print("Access the chat interface at http://localhost:8000")
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True) 
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True) 

@@ -1,4 +1,4 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Header
 from fastapi.security import OAuth2PasswordBearer, APIKeyQuery
 from jose import JWTError, jwt
 from datetime import datetime, timedelta, timezone
@@ -7,6 +7,8 @@ from dotenv import load_dotenv
 from sqlalchemy.orm import Session
 from database import get_db
 from models import User
+from typing import Optional
+from passlib.context import CryptContext
 
 load_dotenv()
 
@@ -14,6 +16,12 @@ load_dotenv()
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 100
+
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# OAuth2 scheme
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
 if not SECRET_KEY:
     raise ValueError("SECRET_KEY not set in environment variables or .env file")
@@ -63,3 +71,11 @@ async def get_current_user(token: str = Depends(api_key_query), db: Session = De
     if user is None:
         raise credentials_exception
     return user # Return the user ORM object 
+
+async def get_token_header(authorization: str = Header(...)):
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing Authorization header"
+        )
+    return authorization.split(" ")[1] 
