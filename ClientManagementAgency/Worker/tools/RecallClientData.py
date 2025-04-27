@@ -19,8 +19,10 @@ class RecallClientData(BaseTool):
         try:
             client_name = self._shared_state.get("client_name")
             if client_name:
+                print(f"Internal Tool Message: Retrieved client name: '{client_name}'")
                 return f"Retrieved client name: '{client_name}'"
             else:
+                print(f"Internal Tool Message: Client name not found in shared state.")
                 return "Client name not found in shared state."
         except Exception as e:
             return f"Error retrieving client name from shared state: {e}"

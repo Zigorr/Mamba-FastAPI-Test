@@ -20,7 +20,9 @@ class SaveClientData(BaseTool):
         under the key 'client_name'.
         """
         try:
+            print(f"Internal Tool Message: Saving client name '{self.client_name}' to shared state.")
             self._shared_state.set("client_name", self.client_name)
+            print(f"Internal Tool Message: Shared state after saving: {self._shared_state.get('client_name')}")
             return f"Successfully saved client name '{self.client_name}' to shared state."
         except Exception as e:
             return f"Error saving client name to shared state: {e}"

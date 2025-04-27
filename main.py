@@ -259,10 +259,12 @@ def save_settings(conversation_id: str, settings: list):
     state.settings[conversation_id] = pickle.dumps(settings)
 
 def load_shared_state(conversation_id: str):
+    print(f"All shared states: {state.shared_states}")
     logger.info(f"Loading shared state for conversation {conversation_id}: {state.shared_states.get(conversation_id, {})}")
     return state.shared_states.get(conversation_id, {})
 
 def save_shared_state(conversation_id: str, shared_state: dict):
+    print(f"All shared states: {state.shared_states}")
     logger.info(f"Saving shared state for conversation {conversation_id}: {shared_state}")
     state.shared_states[conversation_id] = shared_state
 
@@ -398,8 +400,8 @@ async def websocket_endpoint(
             }
         )
 
-        for k, v in load_shared_state(conversation_id).items():
-            agency.shared_state.set(k, v)
+        # for k, v in load_shared_state(conversation_id).items():
+        #     agency.shared_state.set(k, v)
         logger.info(f"Created new agency instance for conversation {conversation_id}")
         # Initial save for new conversations
         try:
@@ -441,6 +443,7 @@ async def websocket_endpoint(
             # Pickle the updated agency state after completion
             
             try:
+                logger.info(f"Agency shared state at conversation {conversation_id}: {agency.shared_state.data}")
                 save_shared_state(conversation_id, agency.shared_state.data)
                 logger.info(f"Saved updated agency state for conversation {conversation_id}")
             except Exception as e:
