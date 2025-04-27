@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, ForeignKey, DateTime, Text, Boolean, Integer, text
+from sqlalchemy import Column, String, ForeignKey, DateTime, Text, Boolean, Integer, text, JSON, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -16,7 +16,12 @@ class User(Base):
     conversations = relationship("Conversation", back_populates="user", cascade="all, delete-orphan")
     messages = relationship("Message", back_populates="sender")
     created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
-    updated_at = Column(DateTime(timezone=True), onupdate=text("NOW()"))
+    updated_at = Column(DateTime(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()"))
+    
+    # Create compound index for frequently searched fields
+    __table_args__ = (
+        Index('idx_user_name_email', 'first_name', 'last_name', 'email'),
+    )
 
 class Conversation(Base):
     __tablename__ = "conversations"
@@ -25,11 +30,20 @@ class Conversation(Base):
     name = Column(String)
     # Foreign key to user
     user_username = Column(String, ForeignKey("users.username"), nullable=False)
+    # New JSON fields for state storage
+    shared_state = Column(JSON, nullable=True, default={})
+    threads = Column(JSON, nullable=True, default={})
+    settings = Column(JSON, nullable=True, default={})
     # Relationships
     user = relationship("User", back_populates="conversations")
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
     created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
-    updated_at = Column(DateTime(timezone=True), onupdate=text("NOW()"))
+    updated_at = Column(DateTime(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()"))
+    
+    # Add index to improve query performance on frequently filtered fields
+    __table_args__ = (
+        Index('idx_conv_user_updated', 'user_username', 'updated_at'),
+    )
 
 class Message(Base):
     __tablename__ = "messages"
@@ -45,7 +59,12 @@ class Message(Base):
     conversation = relationship("Conversation", back_populates="messages")
     sender = relationship("User", back_populates="messages")
     created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
-    updated_at = Column(DateTime(timezone=True), onupdate=text("NOW()"))
+    updated_at = Column(DateTime(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()"))
+    
+    # Add compound index for message filtering and sorting
+    __table_args__ = (
+        Index('idx_message_conv_timestamp', 'conversation_id', 'timestamp'),
+    )
 
 class UserSession(Base):
     __tablename__ = "user_sessions"
@@ -57,9 +76,9 @@ class UserSession(Base):
     disconnected_at = Column(DateTime(timezone=True), nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
-    updated_at = Column(DateTime(timezone=True), onupdate=text("NOW()"))
+    updated_at = Column(DateTime(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()"))
     
-    # Add unique constraint to ensure one active session per user per conversation
+    # Add index for active session queries and unique constraint
     __table_args__ = (
-        # No tuple for a single index
+        Index('idx_session_user_conv_active', 'user_username', 'conversation_id', 'is_active'),
     ) 

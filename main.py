@@ -22,7 +22,8 @@ from chat import handle_websocket_chat
 from dto import (
     CreateUserDto, UserDto, LoginDto, 
     ConversationDto, CreateConversationDto,
-    MessageDto, SendMessageDto, ConversationStateDto
+    MessageDto, SendMessageDto, ConversationStateDto,
+    UpdateConversationStateDto
 )
 
 # New services
@@ -108,12 +109,16 @@ async def create_conversation_endpoint(
 
 @app.get("/conversations", response_model=List[ConversationDto], tags=["Conversations"])
 async def get_user_conversations_endpoint(
+    limit: int = Query(20, description="The maximum number of conversations to return"),
+    offset: int = Query(0, description="The number of conversations to skip"),
     current_user=Depends(get_current_user_from_token),
     db=Depends(get_db)
 ):
-    """Get conversations for the current user."""
+    """Get conversations for the current user with pagination."""
     return await conversation_service.get_user_conversations(
-        current_user.username, 
+        current_user.username,
+        limit,
+        offset,
         db
     )
 
@@ -183,6 +188,34 @@ async def get_conversation_state_endpoint(
     """Get the current state of a conversation."""
     return await conversation_service.get_conversation_state(
         conversation_id, 
+        current_user.username, 
+        db
+    )
+
+@app.get("/conversations/{conversation_id}/data", response_model=ConversationDto, tags=["Conversations"])
+async def get_conversation_data_endpoint(
+    conversation_id: str = Path(..., description="The ID of the conversation"),
+    current_user=Depends(get_current_user_from_token),
+    db=Depends(get_db)
+):
+    """Get full conversation data including state, threads, and settings."""
+    return await conversation_service.get_conversation_data(
+        conversation_id, 
+        current_user.username, 
+        db
+    )
+
+@app.put("/conversations/{conversation_id}/state", response_model=ConversationDto, tags=["Conversations"])
+async def update_conversation_state_endpoint(
+    state_data: UpdateConversationStateDto,
+    conversation_id: str = Path(..., description="The ID of the conversation"),
+    current_user=Depends(get_current_user_from_token),
+    db=Depends(get_db)
+):
+    """Update state fields in a conversation (shared_state, threads, settings)."""
+    return await conversation_service.update_conversation_state(
+        conversation_id, 
+        state_data,
         current_user.username, 
         db
     )

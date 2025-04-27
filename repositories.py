@@ -107,9 +107,11 @@ class ConversationRepository(BaseRepository[Conversation]):
         """Get conversation by ID."""
         return self.db.query(Conversation).filter(Conversation.id == conversation_id).first()
     
-    def get_for_user(self, username: str) -> List[Conversation]:
-        """Get all conversations owned by a user."""
-        return self.db.query(Conversation).filter(Conversation.user_username == username).all()
+    def get_for_user(self, username: str, limit: int = 20, offset: int = 0) -> List[Conversation]:
+        """Get conversations owned by a user with pagination."""
+        return self.db.query(Conversation).filter(
+            Conversation.user_username == username
+        ).order_by(Conversation.updated_at.desc()).offset(offset).limit(limit).all()
     
     def create_from_dto(self, dto: CreateConversationDto, creator_username: str) -> Conversation:
         """Create a new conversation from DTO."""
@@ -136,9 +138,28 @@ class ConversationRepository(BaseRepository[Conversation]):
             id=conversation.id,
             name=conversation.name,
             user_username=conversation.user_username,
-            created_at=conversation.created_at,
-            updated_at=conversation.updated_at
+            shared_state=conversation.shared_state,
+            threads=conversation.threads,
+            settings=conversation.settings
         )
+    
+    def update_state(self, conversation_id: str, state_data: Dict[str, Any]) -> Optional[Conversation]:
+        """Update the state fields of a conversation."""
+        conversation = self.get_by_id(conversation_id)
+        if not conversation:
+            return None
+            
+        # Update only the provided fields
+        if 'shared_state' in state_data:
+            conversation.shared_state = state_data['shared_state']
+        if 'threads' in state_data:
+            conversation.threads = state_data['threads']
+        if 'settings' in state_data:
+            conversation.settings = state_data['settings']
+            
+        self.db.commit()
+        self.db.refresh(conversation)
+        return conversation
 
 class MessageRepository(BaseRepository[Message]):
     """Repository for Message entity."""
@@ -148,9 +169,14 @@ class MessageRepository(BaseRepository[Message]):
     
     def get_for_conversation(self, conversation_id: str, limit: int = 50, offset: int = 0) -> List[Message]:
         """Get messages for a conversation with pagination."""
-        return self.db.query(Message).filter(
+        # Use select() for better query control
+        query = select(Message).where(
             Message.conversation_id == conversation_id
-        ).order_by(desc(Message.timestamp)).offset(offset).limit(limit).all()
+        ).order_by(desc(Message.timestamp)).offset(offset).limit(limit)
+        
+        # Execute with connection for better performance
+        result = self.db.execute(query)
+        return result.scalars().all()
     
     def create_from_dto(self, dto: SendMessageDto, sender_username: str, is_from_agency: bool = False) -> Message:
         """Create a message from DTO."""
@@ -181,6 +207,18 @@ class MessageRepository(BaseRepository[Message]):
     def to_dto(self, message: Message) -> MessageDto:
         """Convert Message model to MessageDto."""
         return MessageDto.from_db_model(message)
+    
+    def bulk_create_messages(self, messages_data: List[Dict[str, Any]]) -> List[Message]:
+        """Create multiple messages in a single database transaction."""
+        messages = [Message(**data) for data in messages_data]
+        
+        # Add all messages in one go
+        self.db.add_all(messages)
+        
+        # Commit the transaction
+        self.db.commit()
+        
+        return messages
 
 class UserSessionRepository(BaseRepository[UserSession]):
     """Repository for UserSession entity."""

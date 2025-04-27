@@ -84,35 +84,31 @@ class ConversationDto(BaseDto):
     id: str
     name: str
     user_username: str
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    shared_state: Optional[Dict[str, Any]] = None
+    threads: Optional[Dict[str, Any]] = None
+    settings: Optional[Dict[str, Any]] = None
     
     @staticmethod
-    def from_db_model(conversation):
-        """Convert a Conversation database model to a ConversationDto."""
+    def from_db_model(model, participants=None, messages=None):
         return ConversationDto(
-            id=conversation.id,
-            name=conversation.name,
-            user_username=conversation.user_username,
-            created_at=conversation.created_at.isoformat() if conversation.created_at else None,
-            updated_at=conversation.updated_at.isoformat() if conversation.updated_at else None
+            id=model.id,
+            name=model.name,
+            created_at=model.created_at,
+            updated_at=model.updated_at,
+            participants=participants or [],
+            messages=messages or [],
+            shared_state=model.shared_state,
+            threads=model.threads,
+            settings=model.settings
         )
     
     @staticmethod
     def to_db_dict(dto_dict, exclude_fields=None):
-        """Convert DTO dict to database dict, excluding specified fields."""
+        """Convert DTO dict to database dict."""
         if exclude_fields is None:
-            exclude_fields = ['created_at', 'updated_at']
+            exclude_fields = []
         
         db_dict = {k: v for k, v in dto_dict.items() if k not in exclude_fields}
-        
-        # Convert datetime strings to datetime objects
-        if 'created_at' in dto_dict and dto_dict['created_at'] and 'created_at' not in exclude_fields:
-            db_dict['created_at'] = dt.fromisoformat(dto_dict['created_at'])
-        
-        if 'updated_at' in dto_dict and dto_dict['updated_at'] and 'updated_at' not in exclude_fields:
-            db_dict['updated_at'] = dt.fromisoformat(dto_dict['updated_at'])
-        
         return db_dict
 
 class CreateConversationDto(BaseDto):
@@ -213,4 +209,10 @@ class UserSessionDto(BaseDto):
 
 class UserSessionsDto(BaseDto):
     username: str
-    active_conversations: List[ConversationDto] 
+    active_conversations: List[ConversationDto]
+
+class UpdateConversationStateDto(BaseDto):
+    """DTO for updating conversation state fields"""
+    shared_state: Optional[Dict[str, Any]] = None
+    threads: Optional[Dict[str, Any]] = None
+    settings: Optional[Dict[str, Any]] = None 
