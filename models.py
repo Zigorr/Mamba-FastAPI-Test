@@ -1,5 +1,6 @@
 from sqlalchemy import Column, String, ForeignKey, Table, DateTime, Text, Boolean, Integer
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func  # Import func
 from database import Base
 import datetime
 
@@ -9,7 +10,7 @@ conversation_participants = Table(
     Base.metadata,
     Column("user_username", String, ForeignKey("users.username"), primary_key=True),
     Column("conversation_id", String, ForeignKey("conversations.id"), primary_key=True),
-    Column("joined_at", DateTime, default=datetime.datetime.utcnow),
+    Column("joined_at", DateTime(timezone=True), server_default=func.now()),
     Column("is_active", Boolean, default=True)
 )
 
@@ -21,6 +22,8 @@ class User(Base):
     last_name = Column(String)
     email = Column(String, unique=True, index=True)
     password = Column(String)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     # Relationships
     conversations = relationship(
@@ -35,8 +38,8 @@ class Conversation(Base):
     
     id = Column(String, primary_key=True, index=True)
     name = Column(String)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     # Relationships
     participants = relationship(
@@ -51,8 +54,10 @@ class Message(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     content = Column(Text)
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now())
     is_from_agency = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     # Foreign keys
     conversation_id = Column(String, ForeignKey("conversations.id"), index=True)
@@ -68,9 +73,11 @@ class UserSession(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_username = Column(String, ForeignKey("users.username"), index=True)
     conversation_id = Column(String, ForeignKey("conversations.id"), index=True)
-    connected_at = Column(DateTime, default=datetime.datetime.utcnow)
-    disconnected_at = Column(DateTime, nullable=True)
+    connected_at = Column(DateTime(timezone=True), server_default=func.now())
+    disconnected_at = Column(DateTime(timezone=True), nullable=True)
     is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     # Add unique constraint to ensure one active session per user per conversation
     __table_args__ = (
