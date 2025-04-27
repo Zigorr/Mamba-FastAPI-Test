@@ -27,7 +27,7 @@ from dto import (
 # Database and Models
 from database import get_db, engine, SessionLocal
 from models import Base, User
-
+from repositories import ConversationRepository
 
 # Agency
 from agency_swarm import Agency
@@ -84,9 +84,9 @@ def save_shared_state(conversation_id: str, shared_state: dict):
     logger.info(f"Saving shared state for conversation {conversation_id}: {shared_state}")
     state.shared_states[conversation_id] = shared_state
 
-@app.get("/", tags=["UI"])
-async def get():
-    return HTMLResponse(html)
+# @app.get("/", tags=["UI"])
+# async def get():
+#     return HTMLResponse(html)
 
 @app.post("/register", response_model=UserDto, tags=["Authentication"])
 async def register_user_endpoint(user_data: CreateUserDto, db=Depends(get_db)):
@@ -97,6 +97,49 @@ async def register_user_endpoint(user_data: CreateUserDto, db=Depends(get_db)):
 async def login_for_access_token(login_data: LoginDto, db=Depends(get_db)):
     """Login a user and return an access token."""
     return await login_user(login_data, db)
+
+@app.post("/chat", tags=["Chat"])
+async def create_chat(
+    request: dict,
+    token: str = Depends(get_token_header),
+    db: Session = Depends(get_db)
+):
+    # Verify token and get current user
+    try:
+        current_user = await get_current_user(token=token, db=db)
+        logger.info(f"User {current_user.username} authenticated for new conversation")
+    except HTTPException as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Authentication failed: {e.detail}"
+        )
+
+    # Get message from request
+    message = request.get("message")
+    if not message:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Message is required"
+        )
+
+    # Create new conversation
+    conversation_repo = ConversationRepository(db)
+    conversation = conversation_repo.create_from_dto(
+        CreateConversationDto(name=f"Chat with {current_user.username}"),
+        creator_username=current_user.username
+    )
+
+    logger.info(f"Created new conversation {conversation.id} for user {current_user.username}")
+
+    # Forward the message to the chat endpoint
+    response = await chat_endpoint(
+        conversation_id=conversation.id,
+        request=request,
+        token=token,
+        db=db
+    )
+    response["conversation_id"] = conversation.id
+    return response
 
 @app.post("/chat/{conversation_id}", tags=["Chat"])
 async def chat_endpoint(
@@ -125,6 +168,22 @@ async def chat_endpoint(
 
     logger.info(f"Received message from client {current_user.username} for conversation {conversation_id}: {message}")
 
+    conversation_repo = ConversationRepository(db)
+
+    # Validate that the conversation belongs to the current user
+    conversation = conversation_repo.get_by_id(conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found"
+        )
+    
+    if conversation.user_username != current_user.username:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this conversation"
+        )
+
     # Initialize or load agency
     agency = None
     if conversation_id in state.conversations:
@@ -136,16 +195,16 @@ async def chat_endpoint(
                 [ceo, [ceo, worker]],
                 shared_instructions='./ClientManagementAgency/agency_manifesto.md',
                 threads_callbacks={
-                    'load': lambda: load_threads(conversation_id),
-                    'save': lambda threads: save_threads(conversation_id, threads),
+                    'load': lambda: conversation_repo.load_threads(conversation_id),
+                    'save': lambda threads: conversation_repo.save_threads(conversation_id, threads),
                 },
                 settings_callbacks={
-                    'load': lambda: load_settings(conversation_id),
-                    'save': lambda settings: save_settings(conversation_id, settings),
+                    'load': lambda: conversation_repo.load_settings(conversation_id),
+                    'save': lambda settings: conversation_repo.save_settings(conversation_id, settings),
                 }
             )
 
-            for k, v in load_shared_state(conversation_id).items():
+            for k, v in conversation_repo.load_shared_state(conversation_id).items():
                 agency.shared_state.set(k, v)
 
             logger.info(f"Loaded existing agency state for conversation {conversation_id}")
@@ -160,20 +219,20 @@ async def chat_endpoint(
             [ceo, [ceo, worker]],
             shared_instructions='./ClientManagementAgency/agency_manifesto.md',
             threads_callbacks={
-                'load': lambda: load_threads(conversation_id),
-                'save': lambda threads: save_threads(conversation_id, threads),
+                'load': lambda: conversation_repo.load_threads(conversation_id),
+                'save': lambda threads: conversation_repo.save_threads(conversation_id, threads),
             },
             settings_callbacks={
-                'load': lambda: load_settings(conversation_id),
-                'save': lambda settings: save_settings(conversation_id, settings),
+                'load': lambda: conversation_repo.load_settings(conversation_id),
+                'save': lambda settings: conversation_repo.save_settings(conversation_id, settings),
             }
         )
 
-        for k, v in load_shared_state(conversation_id).items():
+        for k, v in conversation_repo.load_shared_state(conversation_id).items():
             agency.shared_state.set(k, v)
         logger.info(f"Created new agency instance for conversation {conversation_id}")
         try:
-            save_shared_state(conversation_id, agency.shared_state.data)
+            conversation_repo.save_shared_state(conversation_id, agency.shared_state.data)
         except Exception as e:
             logger.error(f"Error saving initial state for {conversation_id}: {e}")
             raise HTTPException(
@@ -186,7 +245,7 @@ async def chat_endpoint(
         response = agency.get_completion(message=message)
         
         # Save updated state
-        save_shared_state(conversation_id, agency.shared_state.data)
+        conversation_repo.save_shared_state(conversation_id, agency.shared_state.data)
         
         return {"response": response}
     except Exception as e:

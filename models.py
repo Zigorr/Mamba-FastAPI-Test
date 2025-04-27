@@ -33,7 +33,7 @@ class Conversation(Base):
     # New JSON fields for state storage
     shared_state = Column(JSON, nullable=True, default={})
     threads = Column(JSON, nullable=True, default={})
-    settings = Column(JSON, nullable=True, default={})
+    settings = Column(JSON, nullable=True, default=[])
     # Relationships
     user = relationship("User", back_populates="conversations")
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
@@ -65,20 +65,3 @@ class Message(Base):
     __table_args__ = (
         Index('idx_message_conv_timestamp', 'conversation_id', 'timestamp'),
     )
-
-class UserSession(Base):
-    __tablename__ = "user_sessions"
-    
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    user_username = Column(String, ForeignKey("users.username"), index=True)
-    conversation_id = Column(String, ForeignKey("conversations.id"), index=True)
-    connected_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
-    disconnected_at = Column(DateTime(timezone=True), nullable=True)
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
-    updated_at = Column(DateTime(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()"))
-    
-    # Add index for active session queries and unique constraint
-    __table_args__ = (
-        Index('idx_session_user_conv_active', 'user_username', 'conversation_id', 'is_active'),
-    ) 

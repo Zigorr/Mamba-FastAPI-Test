@@ -3,13 +3,13 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, desc, select
 import datetime
 import uuid
+import pickle
 
-from models import User, Conversation, Message, UserSession
+from models import User, Conversation, Message
 from dto import (
     UserDto, CreateUserDto, 
     ConversationDto, CreateConversationDto,
     MessageDto, SendMessageDto,
-    UserSessionDto
 )
 
 T = TypeVar('T')
@@ -160,6 +160,36 @@ class ConversationRepository(BaseRepository[Conversation]):
         self.db.commit()
         self.db.refresh(conversation)
         return conversation
+    
+    def load_threads(self, conversation_id: str):
+        conversation = self.get_by_id(conversation_id)
+        return conversation.threads
+
+    def save_threads(self, conversation_id: str, threads: dict):
+        conversation = self.get_by_id(conversation_id)
+        conversation.threads = threads
+        self.db.commit()
+        self.db.refresh(conversation)
+
+    def load_settings(self, conversation_id: str):
+        conversation = self.get_by_id(conversation_id)
+        return conversation.settings
+
+    def save_settings(self, conversation_id: str, settings: list):
+        conversation = self.get_by_id(conversation_id)
+        conversation.settings = settings
+        self.db.commit()
+        self.db.refresh(conversation)
+
+    def load_shared_state(self, conversation_id: str):
+        conversation = self.get_by_id(conversation_id)
+        return conversation.shared_state
+
+    def save_shared_state(self, conversation_id: str, shared_state: dict):
+        conversation = self.get_by_id(conversation_id)
+        conversation.shared_state = shared_state
+        self.db.commit()
+        self.db.refresh(conversation)
 
 class MessageRepository(BaseRepository[Message]):
     """Repository for Message entity."""
@@ -219,79 +249,3 @@ class MessageRepository(BaseRepository[Message]):
         self.db.commit()
         
         return messages
-
-class UserSessionRepository(BaseRepository[UserSession]):
-    """Repository for UserSession entity."""
-    
-    def __init__(self, db: Session):
-        super().__init__(db, UserSession)
-    
-    def get_active_session(self, username: str, conversation_id: str) -> Optional[UserSession]:
-        """Get active session for a user in a conversation."""
-        return self.db.query(UserSession).filter(
-            and_(
-                UserSession.user_username == username,
-                UserSession.conversation_id == conversation_id,
-                UserSession.is_active == True
-            )
-        ).first()
-    
-    def get_active_sessions_for_conversation(self, conversation_id: str) -> List[UserSession]:
-        """Get all active sessions for a conversation."""
-        return self.db.query(UserSession).filter(
-            and_(
-                UserSession.conversation_id == conversation_id,
-                UserSession.is_active == True
-            )
-        ).all()
-    
-    def create_or_activate_session(self, username: str, conversation_id: str) -> UserSession:
-        """Create or activate a user session."""
-        # Check for existing inactive session
-        session = self.db.query(UserSession).filter(
-            and_(
-                UserSession.user_username == username,
-                UserSession.conversation_id == conversation_id,
-                UserSession.is_active == False
-            )
-        ).first()
-        
-        if session:
-            # Reactivate existing session
-            session.is_active = True
-            session.connected_at = datetime.datetime.utcnow()
-            session.disconnected_at = None
-        else:
-            # Check if there's already an active session
-            active_session = self.get_active_session(username, conversation_id)
-            if not active_session:
-                # Create new session
-                session = UserSession(
-                    user_username=username,
-                    conversation_id=conversation_id,
-                    connected_at=datetime.datetime.utcnow(),
-                    is_active=True
-                )
-                self.db.add(session)
-            else:
-                # Already has active session, just return it
-                return active_session
-        
-        self.db.commit()
-        self.db.refresh(session)
-        return session
-    
-    def deactivate_session(self, username: str, conversation_id: str) -> bool:
-        """Deactivate a user session."""
-        session = self.get_active_session(username, conversation_id)
-        if not session:
-            return False
-        
-        session.is_active = False
-        session.disconnected_at = datetime.datetime.utcnow()
-        self.db.commit()
-        return True
-    
-    def to_dto(self, session: UserSession) -> UserSessionDto:
-        """Convert UserSession model to UserSessionDto."""
-        return UserSessionDto.from_db_model(session) 

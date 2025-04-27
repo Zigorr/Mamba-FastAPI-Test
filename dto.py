@@ -172,45 +172,6 @@ class ConversationStateDto(BaseDto):
     messages: List[MessageDto]
     last_updated: Optional[str] = None
 
-class UserSessionDto(BaseDto):
-    user_username: str
-    conversation_id: str
-    is_active: bool
-    connected_at: Optional[str] = None
-    disconnected_at: Optional[str] = None
-    
-    @staticmethod
-    def from_db_model(session):
-        """Convert a UserSession database model to a UserSessionDto."""
-        return UserSessionDto(
-            user_username=session.user_username,
-            conversation_id=session.conversation_id,
-            is_active=session.is_active,
-            connected_at=session.connected_at.isoformat() if session.connected_at else None,
-            disconnected_at=session.disconnected_at.isoformat() if session.disconnected_at else None
-        )
-    
-    def to_db_dict(self):
-        """Convert DTO to dict suitable for database."""
-        result = {
-            'user_username': self.user_username,
-            'conversation_id': self.conversation_id,
-            'is_active': self.is_active
-        }
-        
-        # Convert datetime strings to datetime objects
-        if self.connected_at:
-            result['connected_at'] = dt.fromisoformat(self.connected_at)
-        
-        if self.disconnected_at:
-            result['disconnected_at'] = dt.fromisoformat(self.disconnected_at)
-            
-        return result
-
-class UserSessionsDto(BaseDto):
-    username: str
-    active_conversations: List[ConversationDto]
-
 class UpdateConversationStateDto(BaseDto):
     """DTO for updating conversation state fields"""
     shared_state: Optional[Dict[str, Any]] = None
