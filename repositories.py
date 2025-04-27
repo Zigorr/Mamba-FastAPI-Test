@@ -1,10 +1,10 @@
 from typing import List, Optional, Dict, Any, Type, TypeVar, Generic
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, desc
+from sqlalchemy import and_, or_, desc, select
 import datetime
 import uuid
 
-from models import User, Conversation, Message, UserSession, conversation_participants
+from models import User, Conversation, Message, UserSession
 from dto import (
     UserDto, CreateUserDto, 
     ConversationDto, CreateConversationDto,
@@ -108,11 +108,8 @@ class ConversationRepository(BaseRepository[Conversation]):
         return self.db.query(Conversation).filter(Conversation.id == conversation_id).first()
     
     def get_for_user(self, username: str) -> List[Conversation]:
-        """Get all conversations a user is part of."""
-        user = self.db.query(User).filter(User.username == username).first()
-        if not user:
-            return []
-        return user.conversations
+        """Get all conversations owned by a user."""
+        return self.db.query(Conversation).filter(Conversation.user_username == username).all()
     
     def create_from_dto(self, dto: CreateConversationDto, creator_username: str) -> Conversation:
         """Create a new conversation from DTO."""
@@ -122,20 +119,10 @@ class ConversationRepository(BaseRepository[Conversation]):
         # Create conversation
         db_conversation = Conversation(
             id=conversation_id,
-            name=dto.name
+            name=dto.name,
+            user_username=creator_username  # Set the owner of the conversation
         )
         self.db.add(db_conversation)
-        
-        # Ensure creator is in the participants list
-        participants = dto.participants.copy()
-        if creator_username not in participants:
-            participants.append(creator_username)
-        
-        # Add participants
-        for username in participants:
-            user = self.db.query(User).filter(User.username == username).first()
-            if user:
-                db_conversation.participants.append(user)
         
         # Commit changes
         self.db.commit()
@@ -179,7 +166,13 @@ class ConversationRepository(BaseRepository[Conversation]):
     
     def to_dto(self, conversation: Conversation) -> ConversationDto:
         """Convert Conversation model to ConversationDto."""
-        return ConversationDto.from_db_model(conversation)
+        return ConversationDto(
+            id=conversation.id,
+            name=conversation.name,
+            user_username=conversation.user_username,
+            created_at=conversation.created_at,
+            updated_at=conversation.updated_at
+        )
 
 class MessageRepository(BaseRepository[Message]):
     """Repository for Message entity."""

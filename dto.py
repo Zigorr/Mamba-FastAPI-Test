@@ -83,17 +83,17 @@ class LoginDto(BaseDto):
 class ConversationDto(BaseDto):
     id: str
     name: str
-    participants: List[str]
+    user_username: str
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     
     @staticmethod
-    def from_db_model(conversation, include_participants=True):
+    def from_db_model(conversation):
         """Convert a Conversation database model to a ConversationDto."""
         return ConversationDto(
             id=conversation.id,
             name=conversation.name,
-            participants=[user.username for user in conversation.participants] if include_participants else [],
+            user_username=conversation.user_username,
             created_at=conversation.created_at.isoformat() if conversation.created_at else None,
             updated_at=conversation.updated_at.isoformat() if conversation.updated_at else None
         )
@@ -102,7 +102,7 @@ class ConversationDto(BaseDto):
     def to_db_dict(dto_dict, exclude_fields=None):
         """Convert DTO dict to database dict, excluding specified fields."""
         if exclude_fields is None:
-            exclude_fields = ['participants', 'created_at', 'updated_at']
+            exclude_fields = ['created_at', 'updated_at']
         
         db_dict = {k: v for k, v in dto_dict.items() if k not in exclude_fields}
         
@@ -117,7 +117,6 @@ class ConversationDto(BaseDto):
 
 class CreateConversationDto(BaseDto):
     name: str
-    participants: List[str]
     
     def to_db_dict(self):
         """Convert to dict suitable for creating a Conversation model."""

@@ -1,18 +1,8 @@
-from sqlalchemy import Column, String, ForeignKey, Table, DateTime, Text, Boolean, Integer
+from sqlalchemy import Column, String, ForeignKey, DateTime, Text, Boolean, Integer
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func  # Import func
+from sqlalchemy.sql import func
 from database import Base
 import datetime
-
-# Association table for many-to-many relationship between users and conversations
-conversation_participants = Table(
-    "conversation_participants",
-    Base.metadata,
-    Column("user_username", String, ForeignKey("users.username"), primary_key=True),
-    Column("conversation_id", String, ForeignKey("conversations.id"), primary_key=True),
-    Column("joined_at", DateTime(timezone=True), server_default=func.now()),
-    Column("is_active", Boolean, default=True)
-)
 
 class User(Base):
     __tablename__ = "users"
@@ -22,32 +12,24 @@ class User(Base):
     last_name = Column(String)
     email = Column(String, unique=True, index=True)
     password = Column(String)
+    # Relationships
+    conversations = relationship("Conversation", back_populates="user", cascade="all, delete-orphan")
+    messages = relationship("Message", back_populates="sender")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
-    # Relationships
-    conversations = relationship(
-        "Conversation", 
-        secondary=conversation_participants,
-        back_populates="participants"
-    )
-    messages = relationship("Message", back_populates="sender")
 
 class Conversation(Base):
     __tablename__ = "conversations"
     
     id = Column(String, primary_key=True, index=True)
     name = Column(String)
+    # Foreign key to user
+    user_username = Column(String, ForeignKey("users.username"), nullable=False)
+    # Relationships
+    user = relationship("User", back_populates="conversations")
+    messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
-    # Relationships
-    participants = relationship(
-        "User", 
-        secondary=conversation_participants,
-        back_populates="conversations"
-    )
-    messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
 
 class Message(Base):
     __tablename__ = "messages"
@@ -56,16 +38,14 @@ class Message(Base):
     content = Column(Text)
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
     is_from_agency = Column(Boolean, default=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
     # Foreign keys
     conversation_id = Column(String, ForeignKey("conversations.id"), index=True)
     sender_username = Column(String, ForeignKey("users.username"))
-    
     # Relationships
     conversation = relationship("Conversation", back_populates="messages")
     sender = relationship("User", back_populates="messages")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 class UserSession(Base):
     __tablename__ = "user_sessions"

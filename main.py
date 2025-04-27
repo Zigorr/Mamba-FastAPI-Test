@@ -21,7 +21,7 @@ from user_service import register_user, login_user
 from chat import handle_websocket_chat
 from dto import (
     CreateUserDto, UserDto, LoginDto, 
-    ConversationDto, CreateConversationDto, JoinConversationDto, LeaveConversationDto,
+    ConversationDto, CreateConversationDto,
     MessageDto, SendMessageDto, ConversationStateDto
 )
 
@@ -130,32 +130,6 @@ async def get_conversation_endpoint(
         db
     )
 
-@app.post("/conversations/join", response_model=ConversationDto, tags=["Conversations"])
-async def join_conversation_endpoint(
-    join_data: JoinConversationDto,
-    current_user=Depends(get_current_user_from_token),
-    db=Depends(get_db)
-):
-    """Join a conversation."""
-    return await conversation_service.join_conversation(
-        join_data, 
-        current_user.username, 
-        db
-    )
-
-@app.post("/conversations/leave", response_model=ConversationDto, tags=["Conversations"])
-async def leave_conversation_endpoint(
-    leave_data: LeaveConversationDto,
-    current_user=Depends(get_current_user_from_token),
-    db=Depends(get_db)
-):
-    """Leave a conversation."""
-    return await conversation_service.leave_conversation(
-        leave_data, 
-        current_user.username, 
-        db
-    )
-
 # Message endpoints
 @app.get("/conversations/{conversation_id}/messages", response_model=List[MessageDto], tags=["Messages"])
 async def get_conversation_messages_endpoint(
@@ -198,14 +172,7 @@ async def send_message_endpoint(
     
     # Then process with agency asynchronously 
     # This will return the agency's response
-    agency_response = await agency_service.process_message_with_agency(
-        message_data,
-        current_user.username,
-        db
-    )
-    
-    # Return the agency's response
-    return agency_response
+    return message
 
 @app.get("/conversations/{conversation_id}/state", response_model=ConversationStateDto, tags=["Conversations"])
 async def get_conversation_state_endpoint(
@@ -213,7 +180,7 @@ async def get_conversation_state_endpoint(
     current_user=Depends(get_current_user_from_token),
     db=Depends(get_db)
 ):
-    """Get the current state of a conversation, including active users and recent messages."""
+    """Get the current state of a conversation."""
     return await conversation_service.get_conversation_state(
         conversation_id, 
         current_user.username, 

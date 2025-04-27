@@ -21,19 +21,18 @@ async def create_conversation(
     current_username: str,
     db: Session = Depends(get_db)
 ) -> ConversationDto:
-    """Create a new conversation with the given participants."""
+    """Create a new conversation."""
     # Initialize repositories
     conversation_repo = ConversationRepository(db)
     user_repo = UserRepository(db)
     message_repo = MessageRepository(db)
     
-    # Verify all participants exist
-    for username in conversation_data.participants:
-        if not user_repo.get_by_username(username):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"User {username} not found"
-            )
+    # Verify user exists
+    if not user_repo.get_by_username(current_username):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User {current_username} not found"
+        )
     
     # Create conversation
     db_conversation = conversation_repo.create_from_dto(conversation_data, current_username)
@@ -65,12 +64,11 @@ async def get_conversation(
             detail=f"Conversation {conversation_id} not found"
         )
     
-    # Check if the user is a participant
-    participants = [user.username for user in db_conversation.participants]
-    if current_username not in participants:
+    # Check if the user is the owner
+    if db_conversation.user_username != current_username:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You are not a participant in this conversation"
+            detail="You are not the owner of this conversation"
         )
     
     # Convert to DTO for response
@@ -226,29 +224,27 @@ async def send_message(
     current_username: str,
     db: Session = Depends(get_db)
 ) -> MessageDto:
-    """Send a message to a conversation."""
+    """Send a message in a conversation."""
     # Initialize repositories
     conversation_repo = ConversationRepository(db)
     message_repo = MessageRepository(db)
     
-    # Get the conversation
+    # Get conversation
     conversation = conversation_repo.get_by_id(message_data.conversation_id)
-    
     if not conversation:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Conversation {message_data.conversation_id} not found"
         )
     
-    # Check if user is a participant
-    participants = [user.username for user in conversation.participants]
-    if current_username not in participants:
+    # Check if the user is the owner
+    if conversation.user_username != current_username:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You are not a participant in this conversation"
+            detail="You are not the owner of this conversation"
         )
     
-    # Create the message
+    # Create message
     message = message_repo.create_from_dto(message_data, current_username)
     
     # Convert to DTO for response
@@ -266,73 +262,69 @@ async def get_conversation_messages(
     conversation_repo = ConversationRepository(db)
     message_repo = MessageRepository(db)
     
-    # Get the conversation
+    # Get conversation
     conversation = conversation_repo.get_by_id(conversation_id)
-    
     if not conversation:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Conversation {conversation_id} not found"
         )
     
-    # Check if user is a participant
-    participants = [user.username for user in conversation.participants]
-    if current_username not in participants:
+    # Check if the user is the owner
+    if conversation.user_username != current_username:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You are not a participant in this conversation"
+            detail="You are not the owner of this conversation"
         )
     
     # Get messages
     messages = message_repo.get_for_conversation(conversation_id, limit, offset)
     
     # Convert to DTOs
-    return [message_repo.to_dto(message) for message in messages]
+    return [message_repo.to_dto(msg) for msg in messages]
 
 async def get_conversation_state(
     conversation_id: str,
     current_username: str,
     db: Session = Depends(get_db)
 ) -> ConversationStateDto:
-    """Get the current state of a conversation, including active users and recent messages."""
+    """Get the current state of a conversation."""
     # Initialize repositories
     conversation_repo = ConversationRepository(db)
-    message_repo = MessageRepository(db)
     session_repo = UserSessionRepository(db)
+    message_repo = MessageRepository(db)
     
-    # Get the conversation
+    # Get conversation
     conversation = conversation_repo.get_by_id(conversation_id)
-    
     if not conversation:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Conversation {conversation_id} not found"
         )
     
-    # Check if user is a participant
-    participants = [user.username for user in conversation.participants]
-    if current_username not in participants:
+    # Check if the user is the owner
+    if conversation.user_username != current_username:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You are not a participant in this conversation"
+            detail="You are not the owner of this conversation"
         )
     
-    # Get active users from both DB and memory
+    # Get active sessions
     active_sessions = session_repo.get_active_sessions_for_conversation(conversation_id)
-    active_users_db = [session.user_username for session in active_sessions]
-    
-    # Merge with in-memory active users
-    active_users_memory = state.get_active_users(conversation_id)
-    active_users = list(set(active_users_db).union(active_users_memory))
+    active_users = [session.user_username for session in active_sessions]
     
     # Get recent messages
-    recent_messages = message_repo.get_for_conversation(conversation_id, limit=20)
-    message_dtos = [message_repo.to_dto(message) for message in recent_messages]
+    messages = message_repo.get_for_conversation(conversation_id, limit=50)
+    message_dtos = [message_repo.to_dto(msg) for msg in messages]
     
-    # Build the state DTO
+    # Get last updated time
+    last_updated = None
+    if messages:
+        last_updated = messages[0].timestamp.isoformat()
+    
     return ConversationStateDto(
         conversation_id=conversation_id,
         active_users=active_users,
         messages=message_dtos,
-        last_updated=conversation.updated_at.isoformat() if conversation.updated_at else None
+        last_updated=last_updated
     ) 

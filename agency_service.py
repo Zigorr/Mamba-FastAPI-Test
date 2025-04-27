@@ -50,9 +50,9 @@ async def get_or_create_agency(conversation_id: str, db: Session):
             conversation = conversation_repo.get_by_id(conversation_id)
             
             if conversation:
-                # Get participants
-                participants = [user.username for user in conversation.participants]
-                logger.info(f"Conversation {conversation_id} has participants: {participants}")
+                # Get owner
+                owner = conversation.user_username
+                logger.info(f"Conversation {conversation_id} is owned by: {owner}")
         
         return agency_instances[conversation_id]
 
@@ -64,6 +64,22 @@ async def process_message_with_agency(
     """Process a user message with the agency and return both user and agency messages."""
     # Initialize repositories
     message_repo = MessageRepository(db)
+    conversation_repo = ConversationRepository(db)
+    
+    # Get conversation
+    conversation = conversation_repo.get_by_id(message_data.conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation {message_data.conversation_id} not found"
+        )
+    
+    # Check if the user is the owner
+    if conversation.user_username != username:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not the owner of this conversation"
+        )
     
     # Get or create agency instance
     agency = await get_or_create_agency(message_data.conversation_id, db)
