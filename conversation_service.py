@@ -7,7 +7,7 @@ from sqlalchemy import and_, or_
 
 from database import get_db
 from models import User, Conversation, Message, UserSession
-from dto import ConversationDto, CreateConversationDto, MessageDto, JoinConversationDto, LeaveConversationDto, SendMessageDto, ConversationStateDto
+from dto import ConversationDto, CreateConversationDto, MessageDto, SendMessageDto, ConversationStateDto
 import state
 from state_manager import conversation_lock
 from repositories import ConversationRepository, UserRepository, MessageRepository, UserSessionRepository
@@ -96,128 +96,6 @@ async def get_user_conversations(
     
     # Convert to DTOs
     return [conversation_repo.to_dto(conv) for conv in conversations]
-
-async def join_conversation(
-    join_data: JoinConversationDto,
-    current_username: str,
-    db: Session = Depends(get_db)
-) -> ConversationDto:
-    """Join a conversation."""
-    # Initialize repositories
-    conversation_repo = ConversationRepository(db)
-    user_repo = UserRepository(db)
-    message_repo = MessageRepository(db)
-    session_repo = UserSessionRepository(db)
-    
-    # Verify the user has permission to add others (they must be a participant)
-    if join_data.username != current_username:
-        # Check if current user is in the conversation
-        db_conversation = conversation_repo.get_by_id(join_data.conversation_id)
-        if not db_conversation:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Conversation {join_data.conversation_id} not found"
-            )
-        
-        participants = [user.username for user in db_conversation.participants]
-        if current_username not in participants:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have permission to add users to this conversation"
-            )
-    
-    # Verify user exists
-    user = user_repo.get_by_username(join_data.username)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User {join_data.username} not found"
-        )
-    
-    # Get conversation
-    conversation = conversation_repo.get_by_id(join_data.conversation_id)
-    if not conversation:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Conversation {join_data.conversation_id} not found"
-        )
-    
-    # Add user to conversation
-    added = conversation_repo.add_participant(join_data.conversation_id, join_data.username)
-    
-    # Create or activate user session
-    session_repo.create_or_activate_session(join_data.username, join_data.conversation_id)
-    
-    # Add system message about user joining
-    message_repo.create_system_message(
-        join_data.conversation_id, 
-        f"User {join_data.username} joined the conversation"
-    )
-    
-    # Register the active session in memory too
-    with conversation_lock(join_data.conversation_id):
-        state.register_active_session(join_data.conversation_id, join_data.username)
-    
-    # Get updated conversation
-    updated_conversation = conversation_repo.get_by_id(join_data.conversation_id)
-    
-    # Convert to DTO for response
-    return conversation_repo.to_dto(updated_conversation)
-
-async def leave_conversation(
-    leave_data: LeaveConversationDto,
-    current_username: str,
-    db: Session = Depends(get_db)
-) -> ConversationDto:
-    """Leave a conversation."""
-    # Initialize repositories
-    conversation_repo = ConversationRepository(db)
-    message_repo = MessageRepository(db)
-    session_repo = UserSessionRepository(db)
-    
-    # Verify the user has permission (can only remove themselves or if they're admin)
-    if leave_data.username != current_username:
-        # Additional permission check would go here
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have permission to remove other users from this conversation"
-        )
-    
-    # Get the conversation
-    conversation = conversation_repo.get_by_id(leave_data.conversation_id)
-    
-    if not conversation:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Conversation {leave_data.conversation_id} not found"
-        )
-    
-    # Verify user is a participant
-    participants = [user.username for user in conversation.participants]
-    if leave_data.username not in participants:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"User {leave_data.username} is not a participant in this conversation"
-        )
-    
-    # Deactivate user session
-    session_repo.deactivate_session(leave_data.username, leave_data.conversation_id)
-    
-    # Add system message about user leaving
-    message_repo.create_system_message(
-        leave_data.conversation_id, 
-        f"User {leave_data.username} left the conversation"
-    )
-    
-    # Unregister the active session in memory
-    with conversation_lock(leave_data.conversation_id):
-        state.unregister_active_session(leave_data.conversation_id, leave_data.username)
-    
-    # Get updated conversation
-    updated_conversation = conversation_repo.get_by_id(leave_data.conversation_id)
-    
-    # Convert to DTO for response
-    return conversation_repo.to_dto(updated_conversation)
 
 async def send_message(
     message_data: SendMessageDto,

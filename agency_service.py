@@ -15,9 +15,11 @@ from state_manager import load_threads, save_threads, load_settings, save_settin
 from repositories import ConversationRepository, UserRepository, MessageRepository
 
 # Agency
-from agency_swarm import Agency
+# Use our agency wrapper instead of trying to import agency.py
+from agency_swarm import Agency as BaseAgency
 from ClientManagementAgency.CEO import CEO
 from ClientManagementAgency.Worker import Worker
+from agency_wrapper import Agency
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -28,9 +30,6 @@ agency_instances: Dict[str, Any] = {}
 
 async def get_or_create_agency(conversation_id: str, db: Session):
     """Get or create an agency instance for a conversation."""
-    # Import inside function to avoid circular imports
-    from agency import Agency
-    
     # Initialize repositories
     conversation_repo = ConversationRepository(db)
     
@@ -44,7 +43,17 @@ async def get_or_create_agency(conversation_id: str, db: Session):
             
             # Create new agency instance
             logger.info(f"Creating new agency instance for conversation {conversation_id}")
-            agency_instances[conversation_id] = Agency(anthropic_api_key)
+            
+            # Create agency components
+            ceo = CEO()
+            worker = Worker()
+            
+            # Create the agency using the wrapper
+            agency_instances[conversation_id] = Agency(
+                agents=[ceo, [ceo, worker]],
+                shared_instructions='./ClientManagementAgency/agency_manifesto.md',
+                conversation_id=conversation_id
+            )
             
             # Get conversation
             conversation = conversation_repo.get_by_id(conversation_id)
@@ -101,8 +110,7 @@ async def process_message_with_agency(
     )
     agency_message = message_repo.create_system_message(
         message_data.conversation_id,
-        response_content,
-        is_agency_message=True
+        response_content
     )
     
     # Convert to DTOs

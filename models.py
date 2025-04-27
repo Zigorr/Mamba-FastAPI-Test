@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, ForeignKey, DateTime, Text, Boolean, Integer
+from sqlalchemy import Column, String, ForeignKey, DateTime, Text, Boolean, Integer, text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -15,8 +15,8 @@ class User(Base):
     # Relationships
     conversations = relationship("Conversation", back_populates="user", cascade="all, delete-orphan")
     messages = relationship("Message", back_populates="sender")
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
+    updated_at = Column(DateTime(timezone=True), onupdate=text("NOW()"))
 
 class Conversation(Base):
     __tablename__ = "conversations"
@@ -28,15 +28,15 @@ class Conversation(Base):
     # Relationships
     user = relationship("User", back_populates="conversations")
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
+    updated_at = Column(DateTime(timezone=True), onupdate=text("NOW()"))
 
 class Message(Base):
     __tablename__ = "messages"
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     content = Column(Text)
-    timestamp = Column(DateTime(timezone=True), server_default=func.now())
+    timestamp = Column(DateTime(timezone=True), server_default=text("NOW()"))
     is_from_agency = Column(Boolean, default=False)
     # Foreign keys
     conversation_id = Column(String, ForeignKey("conversations.id"), index=True)
@@ -44,8 +44,8 @@ class Message(Base):
     # Relationships
     conversation = relationship("Conversation", back_populates="messages")
     sender = relationship("User", back_populates="messages")
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
+    updated_at = Column(DateTime(timezone=True), onupdate=text("NOW()"))
 
 class UserSession(Base):
     __tablename__ = "user_sessions"
@@ -53,11 +53,11 @@ class UserSession(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_username = Column(String, ForeignKey("users.username"), index=True)
     conversation_id = Column(String, ForeignKey("conversations.id"), index=True)
-    connected_at = Column(DateTime(timezone=True), server_default=func.now())
+    connected_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
     disconnected_at = Column(DateTime(timezone=True), nullable=True)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
+    updated_at = Column(DateTime(timezone=True), onupdate=text("NOW()"))
     
     # Add unique constraint to ensure one active session per user per conversation
     __table_args__ = (

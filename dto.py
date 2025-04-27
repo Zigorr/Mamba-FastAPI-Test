@@ -122,14 +122,6 @@ class CreateConversationDto(BaseDto):
         """Convert to dict suitable for creating a Conversation model."""
         return {'name': self.name}
 
-class JoinConversationDto(BaseDto):
-    conversation_id: str
-    username: str
-
-class LeaveConversationDto(BaseDto):
-    conversation_id: str
-    username: str
-
 class MessageDto(BaseDto):
     conversation_id: str
     sender: str

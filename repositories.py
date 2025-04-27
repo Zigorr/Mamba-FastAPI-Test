@@ -130,40 +130,6 @@ class ConversationRepository(BaseRepository[Conversation]):
         
         return db_conversation
     
-    def add_participant(self, conversation_id: str, username: str) -> bool:
-        """Add a user to a conversation."""
-        conversation = self.get_by_id(conversation_id)
-        user = self.db.query(User).filter(User.username == username).first()
-        
-        if not conversation or not user:
-            return False
-        
-        # Check if already a participant
-        for participant in conversation.participants:
-            if participant.username == username:
-                return True  # Already a participant
-        
-        # Add to conversation
-        conversation.participants.append(user)
-        self.db.commit()
-        
-        return True
-    
-    def remove_participant(self, conversation_id: str, username: str) -> bool:
-        """Remove a user from a conversation."""
-        conversation = self.get_by_id(conversation_id)
-        if not conversation:
-            return False
-        
-        # Find the user in participants
-        for participant in conversation.participants:
-            if participant.username == username:
-                conversation.participants.remove(participant)
-                self.db.commit()
-                return True
-        
-        return False  # User not in conversation
-    
     def to_dto(self, conversation: Conversation) -> ConversationDto:
         """Convert Conversation model to ConversationDto."""
         return ConversationDto(
@@ -199,13 +165,13 @@ class MessageRepository(BaseRepository[Message]):
         self.db.refresh(message)
         return message
     
-    def create_system_message(self, conversation_id: str, content: str) -> Message:
+    def create_system_message(self, conversation_id: str, content: str, is_from_agency: bool = True) -> Message:
         """Create a system message."""
         message = Message(
             content=content,
             conversation_id=conversation_id,
             sender_username="System",
-            is_from_agency=True
+            is_from_agency=is_from_agency
         )
         self.db.add(message)
         self.db.commit()
