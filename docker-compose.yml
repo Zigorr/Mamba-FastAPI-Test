@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   app:
     build:
@@ -15,8 +13,6 @@ services:
         - USE_MOCK_DATA=${USE_MOCK_DATA:-false}
     ports:
       - "8000:8000"
-    depends_on:
-      - db
     env_file:
       - .env
     environment:
