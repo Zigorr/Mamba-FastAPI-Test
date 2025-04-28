@@ -1,6 +1,6 @@
 from typing import List, Optional, Dict, Any, Type, TypeVar, Generic
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, desc, select
+from sqlalchemy import and_, or_, desc, select, asc
 import datetime
 import uuid
 import pickle
@@ -208,6 +208,55 @@ class MessageRepository(BaseRepository[Message]):
         result = self.db.execute(query)
         return result.scalars().all()
     
+    def get_conversation_history(self, conversation_id: str) -> List[Message]:
+        """Get all messages for a conversation in chronological order (oldest first)."""
+        query = select(Message).where(
+            Message.conversation_id == conversation_id
+        ).order_by(asc(Message.timestamp))
+        
+        result = self.db.execute(query)
+        return result.scalars().all()
+    
+    def get_messages_flexible(self, conversation_id: str, limit: int = 50, offset: int = 0, ascending: bool = False) -> List[Message]:
+        """
+        Get messages for a conversation with flexible options.
+        
+        Args:
+            conversation_id: The ID of the conversation
+            limit: Maximum number of messages to return (0 for all messages)
+            offset: Number of messages to skip
+            ascending: If True, order by timestamp ascending (oldest first), otherwise descending (newest first)
+            
+        Returns:
+            List of messages
+        """
+        # Build the base query
+        query = select(Message).where(Message.conversation_id == conversation_id)
+        
+        # Add ordering
+        if ascending:
+            query = query.order_by(asc(Message.timestamp))
+        else:
+            query = query.order_by(desc(Message.timestamp))
+        
+        # Add offset
+        if offset > 0:
+            query = query.offset(offset)
+        
+        # Add limit (if not zero)
+        if limit > 0:
+            query = query.limit(limit)
+        
+        # Execute the query
+        result = self.db.execute(query)
+        return result.scalars().all()
+    
+    def count_for_conversation(self, conversation_id: str) -> int:
+        """Get the total count of messages in a conversation."""
+        query = select(Message).where(Message.conversation_id == conversation_id)
+        result = self.db.execute(query)
+        return len(result.scalars().all())
+    
     def create_from_dto(self, dto: SendMessageDto, sender_username: str, is_from_agency: bool = False) -> Message:
         """Create a message from DTO."""
         message = Message(
@@ -226,7 +275,7 @@ class MessageRepository(BaseRepository[Message]):
         message = Message(
             content=content,
             conversation_id=conversation_id,
-            sender_username="System",
+            sender_username=None,
             is_from_agency=is_from_agency
         )
         self.db.add(message)

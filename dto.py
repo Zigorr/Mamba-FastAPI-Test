@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, field_validator
-from typing import Optional, List, Set, Dict, Any, Type, TypeVar, Generic
+from typing import Optional, List, Set, Dict, Any, Type, TypeVar, Generic, ForwardRef
 import re
 import datetime
 from datetime import datetime as dt
@@ -86,7 +86,13 @@ class ConversationDto(BaseDto):
     user_username: str
     shared_state: Optional[Dict[str, Any]] = None
     threads: Optional[Dict[str, Any]] = None
-    settings: Optional[Dict[str, Any]] = None
+    settings: Optional[List[Dict[str, Any]]] = None
+    latest_message: Optional["MessageDto"] = None
+    
+    model_config = {
+        "arbitrary_types_allowed": True,
+        "from_attributes": True
+    }
     
     @staticmethod
     def from_db_model(model, participants=None, messages=None):
@@ -120,7 +126,7 @@ class CreateConversationDto(BaseDto):
 
 class MessageDto(BaseDto):
     conversation_id: str
-    sender: str
+    sender: Optional[str] = None
     content: str
     timestamp: Optional[str] = None
     id: Optional[str] = None
@@ -176,4 +182,4 @@ class UpdateConversationStateDto(BaseDto):
     """DTO for updating conversation state fields"""
     shared_state: Optional[Dict[str, Any]] = None
     threads: Optional[Dict[str, Any]] = None
-    settings: Optional[Dict[str, Any]] = None 
+    settings: Optional[List[Dict[str, Any]]] = None 

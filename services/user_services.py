@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from database import get_db
 from models import User
 from dto import UserDto, CreateUserDto, TokenData, LoginDto
-from repositories import UserRepository
+from repositories import UserRepository, ConversationRepository, MessageRepository
 from auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
 
 # Configure logging
@@ -168,4 +168,23 @@ async def login_user(login_data: LoginDto, db: Session) -> dict:
         data={"sub": user.username}, expires_delta=access_token_expires
     )
     
-    return {"access_token": access_token, "token_type": "bearer", "user": userDto} 
+    # Get user's conversations
+    conversation_repo = ConversationRepository(db)
+    message_repo = MessageRepository(db)
+    
+    conversations = conversation_repo.get_for_user(user.username, limit=10)
+    conversation_summaries = []
+    
+    for conversation in conversations:
+        # Only include ID and name
+        conversation_summaries.append({
+            "id": conversation.id,
+            "name": conversation.name
+        })
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": userDto,
+        "conversations": conversation_summaries
+    } 

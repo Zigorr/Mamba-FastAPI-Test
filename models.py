@@ -33,7 +33,7 @@ class Conversation(Base):
     # New JSON fields for state storage
     shared_state = Column(JSON, nullable=True, default={})
     threads = Column(JSON, nullable=True, default={})
-    settings = Column(JSON, nullable=True, default=[])
+    settings = Column(JSON, nullable=True, default=[])  # Stores a list of assistant settings
     # Relationships
     user = relationship("User", back_populates="conversations")
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
@@ -48,18 +48,17 @@ class Conversation(Base):
 class Message(Base):
     __tablename__ = "messages"
     
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, index=True)
     content = Column(Text)
-    timestamp = Column(DateTime(timezone=True), server_default=text("NOW()"))
+    timestamp = Column(DateTime(timezone=True), server_default=func.now())
     is_from_agency = Column(Boolean, default=False)
-    # Foreign keys
-    conversation_id = Column(String, ForeignKey("conversations.id"), index=True)
-    sender_username = Column(String, ForeignKey("users.username"))
-    # Relationships
+    conversation_id = Column(String, ForeignKey("conversations.id"))
+    sender_username = Column(String, ForeignKey("users.username"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
     conversation = relationship("Conversation", back_populates="messages")
     sender = relationship("User", back_populates="messages")
-    created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
-    updated_at = Column(DateTime(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()"))
     
     # Add compound index for message filtering and sorting
     __table_args__ = (
