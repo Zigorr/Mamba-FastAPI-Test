@@ -107,7 +107,7 @@ class ConversationRepository(BaseRepository[Conversation]):
         """Get conversation by ID."""
         return self.db.query(Conversation).filter(Conversation.id == conversation_id).first()
     
-    def get_for_user(self, username: str, limit: int = 20, offset: int = 0) -> List[Conversation]:
+    def get_for_user(self, username: str, limit: int = 50, offset: int = 0) -> List[Conversation]:
         """Get conversations owned by a user with pagination."""
         return self.db.query(Conversation).filter(
             Conversation.user_username == username
