@@ -1,7 +1,10 @@
-agency-swarm
-fastapi
-uvicorn[standard]
-websockets
-python-dotenv
-python-jose[cryptography]  # For JWT
-passlib[bcrypt]          # For potential password hashing (good practice) 
+agency-swarm>=0.1.0
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+sqlalchemy>=2.0.23
+python-dotenv>=1.0.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+python-multipart>=0.0.6 
