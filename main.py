@@ -139,6 +139,7 @@ async def create_chat(
         db=db
     )
     response["conversation_id"] = conversation.id
+    response["conversation_name"] = conversation.name
     return response
 
 @app.post("/chat/{conversation_id}", tags=["Chat"])

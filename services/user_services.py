@@ -85,7 +85,7 @@ def get_user_by_username(username: str, db: Session) -> Optional[UserDto]:
         last_name=user.last_name
     )
 
-def get_users(db: Session, skip: int = 0, limit: int = 100) -> List[UserDto]:
+def get_users(db: Session, skip: int = 0, limit: int = 50) -> List[UserDto]:
     """Get a list of users."""
     # Initialize repository
     user_repo = UserRepository(db)
@@ -172,15 +172,20 @@ async def login_user(login_data: LoginDto, db: Session) -> dict:
     conversation_repo = ConversationRepository(db)
     message_repo = MessageRepository(db)
     
-    conversations = conversation_repo.get_for_user(user.username, limit=10)
+    conversations = conversation_repo.get_for_user(user.username, limit=50)
     conversation_summaries = []
     
     for conversation in conversations:
-        # Only include ID and name
+        # Include ID, name and updated_at for sorting
         conversation_summaries.append({
             "id": conversation.id,
-            "name": conversation.name
+            "name": conversation.name,
+            "updated_at": conversation.updated_at
         })
+        # Sort conversations by updated_at after loop
+        conversation_summaries = sorted(conversation_summaries, 
+            key=lambda x: x["updated_at"], 
+            reverse=False)
     
     return {
         "access_token": access_token,
