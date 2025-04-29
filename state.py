@@ -5,11 +5,3 @@ conversations = {}
 threads = {}
 settings = {}
 shared_states = {}
-
-# Simple user store (replace with secure user management)
-# Key: username, Value: user info (e.g., {'username': 'user1'})
-# In a real app, you'd store hashed passwords here.
-users = {
-    "testuser": {"username": "testuser"}, # Example user
-    "TheOne1" : {"username": "TheOne1"}
-} 
