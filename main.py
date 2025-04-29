@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 
 # State and Auth
-import state
 import auth
 from auth import get_current_user, create_access_token, get_token_header
 from services.user_services import register_user, login_user
@@ -30,9 +29,7 @@ from models import Base, User
 from repositories import ConversationRepository, MessageRepository, UserRepository
 
 # Agency
-from agency_swarm import Agency
-from ClientManagementAgency.CEO import CEO
-from ClientManagementAgency.Worker import Worker
+from ClientManagementAgency.agency import initialize_agency
 
 load_dotenv(override=True)
 os.environ["SSL_CERT_FILE"] = certifi.where()
@@ -62,27 +59,7 @@ app.add_middleware(
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
-def load_threads(conversation_id):
-    return pickle.loads(state.threads.get(conversation_id, pickle.dumps({})))
 
-def save_threads(conversation_id: str, threads: dict):
-    state.threads[conversation_id] = pickle.dumps(threads)
-
-def load_settings(conversation_id: str):
-    return pickle.loads(state.settings.get(conversation_id, pickle.dumps([])))
-
-def save_settings(conversation_id: str, settings: list):
-    state.settings[conversation_id] = pickle.dumps(settings)
-
-def load_shared_state(conversation_id: str):
-    print(f"All shared states: {state.shared_states}")
-    logger.info(f"Loading shared state for conversation {conversation_id}: {state.shared_states.get(conversation_id, {})}")
-    return state.shared_states.get(conversation_id, {})
-
-def save_shared_state(conversation_id: str, shared_state: dict):
-    print(f"All shared states: {state.shared_states}")
-    logger.info(f"Saving shared state for conversation {conversation_id}: {shared_state}")
-    state.shared_states[conversation_id] = shared_state
 
 @app.get("/")
 async def read_root():
@@ -152,7 +129,7 @@ async def chat_endpoint(
     # Verify token and get current user
     try:
         current_user = await get_current_user(token=token, db=db)
-        logger.info(f"User {current_user.username} authenticated for conversation {conversation_id}")
+        logger.info(f"User {current_user.username} authenticated")
     except HTTPException as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -166,8 +143,6 @@ async def chat_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Message is required"
         )
-
-    logger.info(f"Received message from client {current_user.username} for conversation {conversation_id}: {message}")
 
     conversation_repo = ConversationRepository(db)
     message_repo = MessageRepository(db)  # Create message repository
@@ -186,6 +161,8 @@ async def chat_endpoint(
             detail="You do not have access to this conversation"
         )
 
+    logger.info(f"Received message from client {current_user.username} for conversation {conversation_id}: {message}")
+
     # Save user message to database
     user_message_dto = SendMessageDto(
         conversation_id=conversation_id,
@@ -194,60 +171,7 @@ async def chat_endpoint(
     message_repo.create_from_dto(user_message_dto, current_user.username, is_from_agency=False)
 
     # Initialize or load agency
-    agency = None
-    if conversation_id in state.conversations:
-        try:
-            ceo = CEO()
-            worker = Worker()
-
-            agency = Agency(
-                [ceo, [ceo, worker]],
-                shared_instructions='./ClientManagementAgency/agency_manifesto.md',
-                threads_callbacks={
-                    'load': lambda: conversation_repo.load_threads(conversation_id),
-                    'save': lambda threads: conversation_repo.save_threads(conversation_id, threads),
-                },
-                settings_callbacks={
-                    'load': lambda: conversation_repo.load_settings(conversation_id),
-                    'save': lambda settings: conversation_repo.save_settings(conversation_id, settings),
-                }
-            )
-
-            for k, v in conversation_repo.load_shared_state(conversation_id).items():
-                agency.shared_state.set(k, v)
-
-            logger.info(f"Loaded existing agency state for conversation {conversation_id}")
-        except Exception as e:
-            logger.error(f"Error loading state for {conversation_id}: {e}. Creating new agency.")
-
-    if agency is None:
-        ceo = CEO()
-        worker = Worker()
-
-        agency = Agency(
-            [ceo, [ceo, worker]],
-            shared_instructions='./ClientManagementAgency/agency_manifesto.md',
-            threads_callbacks={
-                'load': lambda: conversation_repo.load_threads(conversation_id),
-                'save': lambda threads: conversation_repo.save_threads(conversation_id, threads),
-            },
-            settings_callbacks={
-                'load': lambda: conversation_repo.load_settings(conversation_id),
-                'save': lambda settings: conversation_repo.save_settings(conversation_id, settings),
-            }
-        )
-
-        for k, v in conversation_repo.load_shared_state(conversation_id).items():
-            agency.shared_state.set(k, v)
-        logger.info(f"Created new agency instance for conversation {conversation_id}")
-        try:
-            conversation_repo.save_shared_state(conversation_id, agency.shared_state.data)
-        except Exception as e:
-            logger.error(f"Error saving initial state for {conversation_id}: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to initialize conversation state"
-            )
+    agency = initialize_agency(conversation_id, conversation_repo)
 
     try:
         # Get completion from agency
@@ -274,7 +198,7 @@ async def chat_endpoint(
 @app.get("/messages/{conversation_id}", tags=["Chat"])
 async def get_messages_flexible(
     conversation_id: str,
-    limit: int = Query(50, description="Maximum number of messages to retrieve, set to 0 for all messages"),
+    limit: int = Query(0, description="Maximum number of messages to retrieve, set to 0 for all messages"),
     offset: int = Query(0, description="Number of messages to skip"),
     order: str = Query("desc", description="Order of messages: 'asc' for oldest first, 'desc' for newest first"),
     token: str = Depends(get_token_header),
@@ -381,159 +305,10 @@ async def get_user_conversations(
     
     return {"conversations": result}
 
-@app.post("/chat/{conversation_id}/agency", tags=["Chat"])
-async def get_agency_response(
-    conversation_id: str,
-    request: dict,
-    token: str = Depends(get_token_header),
-    db: Session = Depends(get_db)
-):
-    """Get a response from the agency for a given message."""
-    # Verify token and get current user
-    try:
-        current_user = await get_current_user(token=token, db=db)
-        logger.info(f"User {current_user.username} requesting agency response for conversation {conversation_id}")
-    except HTTPException as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Authentication failed: {e.detail}"
-        )
-
-    # Get message from request
-    message = request.get("message")
-    if not message:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Message is required"
-        )
-
-    conversation_repo = ConversationRepository(db)
-    message_repo = MessageRepository(db)
-
-    # Validate that the conversation belongs to the current user
-    conversation = conversation_repo.get_by_id(conversation_id)
-    if not conversation:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found"
-        )
-    
-    if conversation.user_username != current_user.username:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have access to this conversation"
-        )
-
-    # Initialize or load agency
-    agency = None
-    if conversation_id in state.conversations:
-        try:
-            ceo = CEO()
-            worker = Worker()
-
-            agency = Agency(
-                [ceo, [ceo, worker]],
-                shared_instructions='./ClientManagementAgency/agency_manifesto.md',
-                threads_callbacks={
-                    'load': lambda: conversation_repo.load_threads(conversation_id),
-                    'save': lambda threads: conversation_repo.save_threads(conversation_id, threads),
-                },
-                settings_callbacks={
-                    'load': lambda: conversation_repo.load_settings(conversation_id),
-                    'save': lambda settings: conversation_repo.save_settings(conversation_id, settings),
-                }
-            )
-
-            for k, v in conversation_repo.load_shared_state(conversation_id).items():
-                agency.shared_state.set(k, v)
-
-            logger.info(f"Loaded existing agency state for conversation {conversation_id}")
-        except Exception as e:
-            logger.error(f"Error loading state for {conversation_id}: {e}. Creating new agency.")
-
-    if agency is None:
-        ceo = CEO()
-        worker = Worker()
-
-        agency = Agency(
-            [ceo, [ceo, worker]],
-            shared_instructions='./ClientManagementAgency/agency_manifesto.md',
-            threads_callbacks={
-                'load': lambda: conversation_repo.load_threads(conversation_id),
-                'save': lambda threads: conversation_repo.save_threads(conversation_id, threads),
-            },
-            settings_callbacks={
-                'load': lambda: conversation_repo.load_settings(conversation_id),
-                'save': lambda settings: conversation_repo.save_settings(conversation_id, settings),
-            }
-        )
-
-        for k, v in conversation_repo.load_shared_state(conversation_id).items():
-            agency.shared_state.set(k, v)
-        logger.info(f"Created new agency instance for conversation {conversation_id}")
-        try:
-            conversation_repo.save_shared_state(conversation_id, agency.shared_state.data)
-        except Exception as e:
-            logger.error(f"Error saving initial state for {conversation_id}: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to initialize conversation state"
-            )
-
-    try:
-        # Get completion from agency
-        response = agency.get_completion(message=message)
-        
-        # Save updated state
-        conversation_repo.save_shared_state(conversation_id, agency.shared_state.data)
-        
-        # Save AI response to database
-        ai_message_dto = SendMessageDto(
-            conversation_id=conversation_id,
-            content=response
-        )
-        message_repo.create_from_dto(ai_message_dto, None, is_from_agency=True)
-        
-        return {"response": response, "is_from_agency": True}
-    except Exception as e:
-        logger.error(f"Error processing message for {conversation_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing message: {str(e)}"
-        )
-
 if __name__ == "__main__":
     print("Starting FastAPI server...")
     print("Ensure .env file has OPENAI_API_KEY and SECRET_KEY")
     print(f"Default user: testuser (no password needed)")
     print("Access the chat interface at http://localhost:8000")
     
-    # Ensure the Agency user exists
-    with SessionLocal() as db:
-        user_repo = UserRepository(db)
-        try:
-            agency_user = user_repo.get_by_username("Agency")
-            if not agency_user:
-                # Create Agency user if it doesn't exist
-                from schemas import CreateUserDto
-                from passlib.context import CryptContext
-                pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-                
-                # Generate a random password for the agency user
-                import secrets
-                agency_password = secrets.token_hex(16)
-                hashed_password = pwd_context.hash(agency_password)
-                
-                agency_user_dto = CreateUserDto(
-                    username="Agency",
-                    first_name="AI",
-                    last_name="Assistant",
-                    email="agency@example.com",
-                    password=hashed_password
-                )
-                user_repo.create(agency_user_dto)
-                print("Created Agency user for system messages")
-        except Exception as e:
-            print(f"Warning: Could not create Agency user: {e}")
-    
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True) 
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
