@@ -185,7 +185,7 @@ async def login_user(login_data: LoginDto, db: Session) -> dict:
         # Sort conversations by updated_at after loop
         conversation_summaries = sorted(conversation_summaries, 
             key=lambda x: x["updated_at"], 
-            reverse=True)
+            reverse=False)
     
     return {
         "access_token": access_token,
