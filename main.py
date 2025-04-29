@@ -84,9 +84,9 @@ def save_shared_state(conversation_id: str, shared_state: dict):
     logger.info(f"Saving shared state for conversation {conversation_id}: {shared_state}")
     state.shared_states[conversation_id] = shared_state
 
-# @app.get("/", tags=["UI"])
-# async def get():
-#     return HTMLResponse(html)
+@app.get("/")
+async def read_root():
+     return {"message": "Welcome to the Mamba FastAPI"}
 
 @app.post("/register", response_model=UserDto, tags=["Authentication"])
 async def register_user_endpoint(user_data: CreateUserDto, db=Depends(get_db)):
