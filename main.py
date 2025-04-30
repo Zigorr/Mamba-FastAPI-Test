@@ -177,8 +177,6 @@ async def chat_endpoint(
         # Get completion from agency
         agency_response = agency.get_completion(message=message)
         
-        # Save updated state
-        conversation_repo.save_shared_state(conversation_id, agency.shared_state.data)
         
         # Save AI response to database
         ai_message_dto = SendMessageDto(
@@ -187,17 +185,28 @@ async def chat_endpoint(
         )
         message_repo.create_from_dto(ai_message_dto, None, is_from_agency=True)
         
-        if agency.shared_state.get("action"):
-            action = agency.shared_state.get("action")
-            return {"response": agency_response, "is_from_agency": True, "action": action}
+        agency_action = agency.shared_state.get("action")
+        if agency_action:
+            response = {
+                "response": agency_response, 
+                "is_from_agency": True, 
+                "action": agency_action
+            }
         else:
-            return {"response": agency_response, "is_from_agency": True}
+            response = {
+                "response": agency_response, "is_from_agency": True}
+            
+        if agency_action and agency_action.get("action-type") == "keywords_ready":
+            agency.shared_state.set("action", None)
+        # Save updated state
+        conversation_repo.save_shared_state(conversation_id, agency.shared_state.data)
     except Exception as e:
         logger.error(f"Error processing message for {conversation_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error processing message: {str(e)}"
         )
+    return response
 
 @app.get("/messages/{conversation_id}", tags=["Chat"])
 async def get_messages_flexible(
