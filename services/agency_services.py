@@ -1,6 +1,5 @@
 from agency_swarm import Agency
-from .CEO import CEO
-from .Worker import Worker
+from .MambaSEOAgency.SEOEngineer import SEOEngineer
 import logging
 from fastapi import HTTPException, status
 
@@ -8,12 +7,11 @@ logger = logging.getLogger(__name__)
 
 
 def initialize_agency(conversation_id, conversation_repo):
-    ceo = CEO()
-    worker = Worker()
+    ceo = SEOEngineer()
 
     agency = Agency(
-        [ceo, [ceo, worker]],
-        shared_instructions='./ClientManagementAgency/agency_manifesto.md',
+        [ceo],
+        shared_instructions='./MambaSEOAgency/agency_manifesto.md',
         threads_callbacks={
             'load': lambda: conversation_repo.load_threads(conversation_id),
             'save': lambda threads: conversation_repo.save_threads(conversation_id, threads),

@@ -29,7 +29,7 @@ from models import Base, User
 from repositories import ConversationRepository, MessageRepository, UserRepository
 
 # Agency
-from ClientManagementAgency.agency import initialize_agency
+from services.agency_services import initialize_agency
 
 load_dotenv(override=True)
 os.environ["SSL_CERT_FILE"] = certifi.where()
@@ -175,7 +175,7 @@ async def chat_endpoint(
 
     try:
         # Get completion from agency
-        response = agency.get_completion(message=message)
+        agency_response = agency.get_completion(message=message)
         
         # Save updated state
         conversation_repo.save_shared_state(conversation_id, agency.shared_state.data)
@@ -183,11 +183,15 @@ async def chat_endpoint(
         # Save AI response to database
         ai_message_dto = SendMessageDto(
             conversation_id=conversation_id,
-            content=response
+            content=agency_response
         )
         message_repo.create_from_dto(ai_message_dto, None, is_from_agency=True)
         
-        return {"response": response, "is_from_agency": True}
+        if agency.shared_state.get("action"):
+            action = agency.shared_state.get("action")
+            return {"response": agency_response, "is_from_agency": True, "action": action}
+        else:
+            return {"response": agency_response, "is_from_agency": True}
     except Exception as e:
         logger.error(f"Error processing message for {conversation_id}: {e}")
         raise HTTPException(
@@ -304,6 +308,89 @@ async def get_user_conversations(
         result.append(conv_dto)
     
     return {"conversations": result}
+
+@app.post("/submit_form/{conversation_id}", tags=["Chat"])
+async def submit_form(
+    conversation_id: str,
+    request: dict,
+    token: str = Depends(get_token_header),
+    db: Session = Depends(get_db)
+):
+    """Submit a form for a conversation."""
+    # Verify token and get current user
+    try:
+        current_user = await get_current_user(token=token, db=db)
+        logger.info(f"User {current_user.username} authenticated")
+    except HTTPException as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Authentication failed: {e.detail}"
+        )
+
+    # Get message from request
+    form_data = request.get("form_data")
+    if not form_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Form data is required"
+        )
+
+    conversation_repo = ConversationRepository(db)
+    message_repo = MessageRepository(db)  # Create message repository
+
+    # Validate that the conversation belongs to the current user
+    conversation = conversation_repo.get_by_id(conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found"
+        )
+    
+    if conversation.user_username != current_user.username:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this conversation"
+        )
+
+    logger.info(f"Received business form data from client {current_user.username} for conversation {conversation_id}")
+    message = "I have submitted the form"
+    # Save user message to database
+    user_message_dto = SendMessageDto(
+        conversation_id=conversation_id,
+        content=message
+    )
+    message_repo.create_from_dto(user_message_dto, current_user.username, is_from_agency=False)
+
+    # Initialize or load agency
+    agency = initialize_agency(conversation_id, conversation_repo)
+
+    try:
+        # Set the form data in the shared state
+        agency.shared_state.set('business_info_data', form_data)
+        # Get completion from agency
+        agency_response = agency.get_completion(message=message)
+        
+        # Save updated state
+        conversation_repo.save_shared_state(conversation_id, agency.shared_state.data)
+        
+        # Save AI response to database
+        ai_message_dto = SendMessageDto(
+            conversation_id=conversation_id,
+            content=agency_response
+        )
+        message_repo.create_from_dto(ai_message_dto, None, is_from_agency=True)
+        
+        if agency.shared_state.get("action"):
+            action = agency.shared_state.get("action")
+            return {"response": agency_response, "is_from_agency": True, "action": action}
+        else:
+            return {"response": agency_response, "is_from_agency": True}
+    except Exception as e:
+        logger.error(f"Error processing message for {conversation_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error processing message: {str(e)}"
+        )
 
 if __name__ == "__main__":
     print("Starting FastAPI server...")
