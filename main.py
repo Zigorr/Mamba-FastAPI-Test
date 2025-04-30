@@ -271,6 +271,9 @@ async def get_messages_flexible(
     message_dtos = [message_repo.to_dto(message) for message in messages]
 
     agency = initialize_agency(conversation_id, conversation_repo)
+
+    latest_action = agency.shared_state.get("action", None)
+
     keyword_tables = agency.shared_state.get("keywords_output", None)
     generated_content = {}
     
@@ -284,7 +287,8 @@ async def get_messages_flexible(
         "order": order,
         "limit": limit,
         "offset": offset,
-        "generated_content": generated_content
+        "generated_content": generated_content,
+        "action": latest_action
     }
 
 @app.get("/conversations", tags=["Chat"])

@@ -189,4 +189,4 @@ async def login_user(login_data: LoginDto, db: Session) -> dict:
         "token_type": "bearer",
         "user": userDto,
         "conversations": conversation_summaries
-    } 
+    }

@@ -1,6 +1,7 @@
 from typing import List, Optional, Dict, Any, Type, TypeVar, Generic
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, desc, select, asc
+from sqlalchemy.sql import func
 import datetime
 import uuid
 import pickle
@@ -185,6 +186,17 @@ class ConversationRepository(BaseRepository[Conversation]):
         self.db.commit()
         self.db.refresh(conversation)
 
+
+    def update_conversation(self, conversation_id: str) -> Optional[Conversation]:
+        """Manually update the `updated_at` timestamp for a conversation."""
+        updated = self.db.query(Conversation).filter(
+            Conversation.id == conversation_id
+        ).first().update(
+            {Conversation.updated_at: func.now()}
+        )
+        if updated:
+            self.db.commit()
+
 class MessageRepository(BaseRepository[Message]):
     """Repository for Message entity."""
     
@@ -259,6 +271,8 @@ class MessageRepository(BaseRepository[Message]):
             sender_email=sender_email,
             is_from_agency=is_from_agency
         )
+        conversation_repo = ConversationRepository(self.db)
+        conversation_repo.update_conversation(dto.conversation_id)
         self.db.add(message)
         self.db.commit()
         self.db.refresh(message)
