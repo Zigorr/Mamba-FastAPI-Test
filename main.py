@@ -449,6 +449,8 @@ async def get_keywords(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Table ID not found"
         )
+    agency.shared_state.set('action', None)
+    conversation_repo.save_shared_state(conversation_id, agency.shared_state.data)
 
     return table_data
 

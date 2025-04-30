@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 # Import the specific tools
 from .tools.CollectBusinessInfoTool import CollectBusinessInfoTool
 from .tools.BoFuListTool import BoFuListTool
-#from .tools.ToFuListTool import ToFuListTool
+from .tools.ToFuListTool import ToFuListTool
 from .tools.RetrieveClientContextTool import RetrieveClientContextTool
 #from .tools.DisplayKeywordsTool import DisplayKeywordsTool
 
@@ -21,7 +21,7 @@ class SEOEngineer(Agent):
             tools=[
                 CollectBusinessInfoTool,
                 BoFuListTool,
-                #ToFuListTool,
+                ToFuListTool,
                 RetrieveClientContextTool
                 #DisplayKeywordsTool
             ],
