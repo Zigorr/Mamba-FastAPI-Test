@@ -329,11 +329,15 @@ async def submit_form(
 
     # Get message from request
     form_data = request.get("form_data")
+    form_action = request.get("action", None)
     if not form_data:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Form data is required"
-        )
+        if form_action == "cancel_form":
+            message = "I have cancelled the form"
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Form data is required"
+            )
 
     conversation_repo = ConversationRepository(db)
     message_repo = MessageRepository(db)  # Create message repository
@@ -366,7 +370,8 @@ async def submit_form(
 
     try:
         # Set the form data in the shared state
-        agency.shared_state.set('business_info_data', form_data)
+        if form_data:
+            agency.shared_state.set('business_info_data', form_data)
         # Get completion from agency
         agency_response = agency.get_completion(message=message)
         
