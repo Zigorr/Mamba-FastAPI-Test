@@ -372,6 +372,8 @@ async def submit_form(
         # Set the form data in the shared state
         if form_data:
             agency.shared_state.set('business_info_data', form_data)
+        if form_action == "cancel_form":
+            agency.shared_state.set('action', None)
         # Get completion from agency
         agency_response = agency.get_completion(message=message)
         
@@ -396,7 +398,7 @@ async def submit_form(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error processing message: {str(e)}"
         )
-@app.get("/get_keywords/{conversation_id}", tags=["Chat"])
+@app.post("/get_keywords/{conversation_id}", tags=["Chat"])
 async def get_keywords(
     conversation_id: str,
     request: dict,
