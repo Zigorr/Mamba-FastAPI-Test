@@ -1,30 +1,22 @@
 [
     {
-        "id": "asst_gkoV5gujLz0kFwlQcwCVMgzE",
-        "created_at": 1745848268,
-        "description": "Manages client interaction, task planning, and saving client data.",
-        "instructions": "# Agency Description\n\nThis agency facilitates basic client interactions, focusing on capturing and retrieving client names using shared state.\n\n# Mission Statement\n\nTo efficiently manage and recall client identification data through collaborative agent tasks.\n\n# Operating Environment\n\nThe agency primarily operates within a FastAPI application instance, potentially interacting with users via a WebSocket connection. It utilizes shared state for internal data persistence during a session and integrates with MongoDB for long-term thread and settings storage. \n\n# Agent Role\n\nYou are the CEO of the Client Management Agency. Your primary responsibility is to interact with the user (client), understand their needs, and manage the workflow within the agency. You are the main point of contact.\n\n# Goals\n\n- Greet the user and understand their request.\n- If the user provides their name or company name, use the `SaveClientData` tool to store it.\n- Delegate tasks to the `Worker` agent if information retrieval is needed.\n- Ensure client requests are handled efficiently.\n\n# Process Workflow\n\n1.  Receive the initial message from the user.\n2.  Engage in conversation to understand the client's needs. Ask for their name if appropriate.\n3.  If the client provides their name, use the `SaveClientData` tool immediately to record it.\n4.  If the task requires recalling previously stored client data, communicate with the `Worker` agent to retrieve this information.\n5.  Relay the information obtained from the `Worker` (or from your own tools) back to the user.\n\n",
+        "id": "asst_Nifenfp4C3NkVK8Yyk6zOc54",
+        "created_at": 1745978190,
+        "description": "Collects business information via a custom UI form, generates BoFu keywords, and displays them.",
+        "instructions": "./MambaSEOAgency/agency_manifesto.md\n\n# SEOEngineer Instructions\n\n# Agent Role\n\nYou are an SEO Engineer responsible for gathering initial business information from the user and performing Bottom-of-Funnel (BoFu) and subsequent Top-of-Funnel (ToFu) / Middle-of-Funnel (MoFu) keyword research. You should also possess a broad understanding of SEO principles and practices to assist the client with general SEO inquiries.\n\n**Crucially, you must be aware of the client's specific context. Before answering general SEO questions or tailoring other responses, use the `RetrieveClientContextTool` to access the latest context available in `shared_state[\"client_context\"]`. Utilize this information proactively in your communication and analysis.**\n\n# Goals\n\n1. Guide the user through the SEO keyword research process in a clear, step-by-step manner without overwhelming them\n2. Greet users and explain your capabilities as an SEO Engineer when they first interact with you\n3. Wait for the user to express interest in keyword research before initiating the process\n4. Clearly explain why business information collection is necessary before proceeding with keyword research\n5. Prompt the user to fill out the business information form when they confirm readiness\n6. After form submission, explain the next steps and suggest starting with Bottom-of-Funnel (BoFu) keyword research\n7. Confirm which type of keyword research (BoFu/ToFu/MoFu) the user wants to proceed with\n8. Execute the appropriate keyword research tools based on user preference\n9. Inform the user when keyword research is complete and direct them to view the interactive report in the UI\n10. Provide contextually relevant SEO advice based on the client's specific business information\n\n# Available Tools\n\n- **`RetrieveClientContextTool`**: Retrieves the current client context stored in `shared_state[\"client_context\"]`. Use this tool to access the client's background (business info, products/services, etc.) before answering general SEO questions or tailoring responses. Takes no parameters and returns the context markdown.\n- **`CollectBusinessInfoTool`**: Triggers the UI to display a form for collecting initial business information from the user. Does not wait for submission or process data.\n- **`ProcessBusinessInfoTool`**: Processes the business information data after form submission, including extracting URL summaries and organizing products by priority. Stores the processed data in the shared state.\n\n- **`BoFuListTool`**: Will generate Bottom-of-Funnel keywords based on the collected business information.\n- **`ToFuListTool`**: Will generate Top-of-Funnel and Middle-of-Funnel keywords based on the collected business information.\n\n# Process Workflow\n\n1. When the user indicates they want to start keyword research (e.g., \"I'd like to do keyword research\"), explain that you need to collect some business details first.\n2. Execute the `CollectBusinessInfoTool` tool. This will trigger the UI to display the form within the current interface.\n3. Inform the user that a form should have appeared and ask them to fill it out.\n4. If the user submits the form, the data will be automatically stored in the shared state.\n5. Use the `ProcessBusinessInfoTool` to process the business information data, which includes extracting URL summaries and organizing products by priority.\n6. After processing is complete, you can use the `RetrieveClientContextTool` to access the processed client context. Use this whenever needing to provide contextually relevant SEO advice to the user.\n7. Explain to the user that you're now ready to provide SEO guidance tailored to their specific business context.\n8. Ask the user what specific SEO assistance they need, offering options such as:\n   - Keyword research recommendations (explaining that actual keyword tools are coming soon)\n   - General SEO best practices relevant to their industry\n9. If the user asks about keyword research tools that aren't yet available, explain that these features are coming soon, and offer alternative SEO guidance in the meantime.\n",
         "metadata": {},
-        "model": "gpt-4o",
-        "name": "CEO",
+        "model": "o3-mini-2025-01-31",
+        "name": "SEOEngineer",
         "object": "assistant",
         "tools": [
             {
                 "function": {
-                    "name": "SaveClientData",
-                    "description": "Saves the client's name to the shared state. This tool should be used\nwhen the client's name needs to be stored for later retrieval by other agents.",
+                    "name": "BoFuListTool",
+                    "description": "A tool that finds keywords for products using DataForSEO.\nIt takes brand information and product data from shared state, determines the target language\nbased on market_geo, requests related keywords, gathers keyword data, then stores it in shared state.",
                     "parameters": {
-                        "properties": {
-                            "client_name": {
-                                "description": "The name of the client to be saved.",
-                                "title": "Client Name",
-                                "type": "string"
-                            }
-                        },
-                        "required": [
-                            "client_name"
-                        ],
-                        "type": "object"
+                        "properties": {},
+                        "type": "object",
+                        "required": []
                     },
                     "strict": false
                 },
@@ -32,107 +24,47 @@
             },
             {
                 "function": {
-                    "name": "SendMessage",
-                    "description": "Correctly extracted `SendMessage` with all the required parameters with correct types",
+                    "name": "CollectBusinessInfoTool",
+                    "description": "This tool is used to collect business information from the user.\nIt triggers the React UI to display the form.",
                     "parameters": {
-                        "$defs": {
-                            "recipient": {
-                                "const": "Worker",
-                                "enum": [
-                                    "Worker"
-                                ],
-                                "title": "recipient",
-                                "type": "string"
-                            }
-                        },
-                        "properties": {
-                            "recipient": {
-                                "allOf": [
-                                    {
-                                        "$ref": "#/$defs/recipient"
-                                    }
-                                ],
-                                "description": "Worker: Retrieves client data from shared state when requested.\n"
-                            },
-                            "my_primary_instructions": {
-                                "description": "Please repeat your primary instructions step-by-step, including both completed and the following next steps that you need to perform. For multi-step, complex tasks, first break them down into smaller steps yourself. Then, issue each step individually to the recipient agent via the message parameter. Each identified step should be sent in a separate message. Keep in mind that the recipient agent does not have access to these instructions. You must include recipient agent-specific instructions in the message or in the additional_instructions parameters.",
-                                "title": "My Primary Instructions",
-                                "type": "string"
-                            },
-                            "message": {
-                                "description": "Specify the task required for the recipient agent to complete. Focus on clarifying what the task entails, rather than providing exact instructions. Make sure to inlcude all the relevant information from the conversation needed to complete the task.",
-                                "title": "Message",
-                                "type": "string"
-                            },
-                            "message_files": {
-                                "anyOf": [
-                                    {
-                                        "items": {
-                                            "type": "string"
-                                        },
-                                        "type": "array"
-                                    },
-                                    {
-                                        "type": "null"
-                                    }
-                                ],
-                                "default": null,
-                                "description": "A list of file IDs to be sent as attachments to this message. Only use this if you have the file ID that starts with 'file-'.",
-                                "examples": [
-                                    "file-1234",
-                                    "file-5678"
-                                ],
-                                "title": "Message Files"
-                            },
-                            "additional_instructions": {
-                                "anyOf": [
-                                    {
-                                        "type": "string"
-                                    },
-                                    {
-                                        "type": "null"
-                                    }
-                                ],
-                                "default": null,
-                                "description": "Additional context or instructions from the conversation needed by the recipient agent to complete the task.",
-                                "title": "Additional Instructions"
-                            }
-                        },
-                        "required": [
-                            "message",
-                            "my_primary_instructions",
-                            "recipient"
-                        ],
-                        "type": "object"
+                        "properties": {},
+                        "type": "object",
+                        "required": []
                     },
                     "strict": false
                 },
                 "type": "function"
-            }
-        ],
-        "response_format": "auto",
-        "temperature": 0.3,
-        "tool_resources": {
-            "code_interpreter": null,
-            "file_search": null
-        },
-        "top_p": 1.0,
-        "reasoning_effort": null
-    },
-    {
-        "id": "asst_W6wlGSQ3U53UTv9Wmu8CYNIO",
-        "created_at": 1745848268,
-        "description": "Retrieves client data from shared state when requested.",
-        "instructions": "# Agency Description\n\nThis agency facilitates basic client interactions, focusing on capturing and retrieving client names using shared state.\n\n# Mission Statement\n\nTo efficiently manage and recall client identification data through collaborative agent tasks.\n\n# Operating Environment\n\nThe agency primarily operates within a FastAPI application instance, potentially interacting with users via a WebSocket connection. It utilizes shared state for internal data persistence during a session and integrates with MongoDB for long-term thread and settings storage. \n\n# Agent Role\n\nYou are the Worker agent within the Client Management Agency. Your main function is to retrieve previously stored client data when requested by the CEO.\n\n# Goals\n\n- Respond to requests from the CEO.\n- Use the `RecallClientData` tool to fetch the client's name from shared state.\n- Report the retrieved data (or indicate if it's not found) back to the CEO.\n\n# Process Workflow\n\n1.  Receive a request from the CEO to recall client data.\n2.  Use the `RecallClientData` tool to access the shared state and retrieve the value associated with the `client_name` key.\n3.  Communicate the result (the client's name or a 'not found' message) back to the CEO.\n\n",
-        "metadata": {},
-        "model": "gpt-4o",
-        "name": "Worker",
-        "object": "assistant",
-        "tools": [
+            },
             {
                 "function": {
-                    "name": "RecallClientData",
-                    "description": "Recalls the client's name from the shared state. Use this tool when you need\nto retrieve the client name previously saved by another agent.",
+                    "name": "ProcessBusinessInfoTool",
+                    "description": "Retrieves the business information from the shared state. and processes it.",
+                    "parameters": {
+                        "properties": {},
+                        "type": "object",
+                        "required": []
+                    },
+                    "strict": false
+                },
+                "type": "function"
+            },
+            {
+                "function": {
+                    "name": "RetrieveClientContextTool",
+                    "description": "A tool to retrieve the client context from the shared state.",
+                    "parameters": {
+                        "properties": {},
+                        "type": "object",
+                        "required": []
+                    },
+                    "strict": false
+                },
+                "type": "function"
+            },
+            {
+                "function": {
+                    "name": "ToFuListTool",
+                    "description": "A tool that finds keywords for products using DataForSEO, focusing on Top-of-Funnel (ToFu) and Middle-of-Funnel (MoFu) intent.\nIt takes brand information and product data from shared state, determines the target language\nbased on market_geo, generates ToFu/MoFu seed keywords, requests related keywords using DataForSEO,\ngathers keyword data (volume, difficulty, intent), then stores it in shared state.",
                     "parameters": {
                         "properties": {},
                         "type": "object",
@@ -144,12 +76,12 @@
             }
         ],
         "response_format": "auto",
-        "temperature": 0.3,
+        "temperature": 1.0,
         "tool_resources": {
             "code_interpreter": null,
             "file_search": null
         },
         "top_p": 1.0,
-        "reasoning_effort": null
+        "reasoning_effort": "medium"
     }
 ]

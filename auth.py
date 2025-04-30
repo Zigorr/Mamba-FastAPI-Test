@@ -41,10 +41,10 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
 def verify_token(token: str, credentials_exception):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
+        email: str = payload.get("sub")
+        if email is None:
             raise credentials_exception
-        token_data = {"username": username}
+        token_data = {"email": email}
     except JWTError:
         raise credentials_exception
     return token_data
@@ -67,7 +67,7 @@ async def get_current_user(token: str = Depends(api_key_query), db: Session = De
         )
     
     token_data = verify_token(token, credentials_exception)
-    user = db.query(User).filter(User.username == token_data["username"]).first()
+    user = db.query(User).filter(User.email == token_data["email"]).first()
     if user is None:
         raise credentials_exception
     return user # Return the user ORM object 

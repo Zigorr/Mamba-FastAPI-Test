@@ -1,6 +1,7 @@
 from typing import List, Optional, Dict, Any, Type, TypeVar, Generic
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, desc, select, asc
+from sqlalchemy.sql import func
 import datetime
 import uuid
 import pickle
@@ -66,10 +67,6 @@ class UserRepository(BaseRepository[User]):
     def __init__(self, db: Session):
         super().__init__(db, User)
     
-    def get_by_username(self, username: str) -> Optional[User]:
-        """Get user by username."""
-        return self.db.query(User).filter(User.username == username).first()
-    
     def get_by_email(self, email: str) -> Optional[User]:
         """Get user by email."""
         return self.db.query(User).filter(User.email == email).first()
@@ -78,10 +75,9 @@ class UserRepository(BaseRepository[User]):
         """Create a new user from DTO."""
         # Create a dictionary from the DTO
         user_dict = {
-            "username": user_dto.username,
+            "email": user_dto.email,
             "first_name": user_dto.first_name,
             "last_name": user_dto.last_name,
-            "email": user_dto.email,
             "password": hashed_password
         }
         
@@ -91,10 +87,9 @@ class UserRepository(BaseRepository[User]):
     def to_dto(self, user: User) -> UserDto:
         """Convert User model to UserDto."""
         return UserDto(
-            username=user.username,
+            email=user.email,
             first_name=user.first_name,
-            last_name=user.last_name,
-            email=user.email
+            last_name=user.last_name
         )
 
 class ConversationRepository(BaseRepository[Conversation]):
@@ -107,13 +102,13 @@ class ConversationRepository(BaseRepository[Conversation]):
         """Get conversation by ID."""
         return self.db.query(Conversation).filter(Conversation.id == conversation_id).first()
     
-    def get_for_user(self, username: str, limit: int = 50, offset: int = 0) -> List[Conversation]:
+    def get_for_user(self, email: str, limit: int = 50, offset: int = 0) -> List[Conversation]:
         """Get conversations owned by a user with pagination."""
         return self.db.query(Conversation).filter(
-            Conversation.user_username == username
+            Conversation.user_email == email
         ).order_by(Conversation.updated_at.desc()).offset(offset).limit(limit).all()
     
-    def create_from_dto(self, dto: CreateConversationDto, creator_username: str) -> Conversation:
+    def create_from_dto(self, dto: CreateConversationDto, creator_email: str) -> Conversation:
         """Create a new conversation from DTO."""
         # Generate ID if not provided
         conversation_id = f"conv-{uuid.uuid4()}"
@@ -122,7 +117,7 @@ class ConversationRepository(BaseRepository[Conversation]):
         db_conversation = Conversation(
             id=conversation_id,
             name=dto.name,
-            user_username=creator_username  # Set the owner of the conversation
+            user_email=creator_email  # Set the owner of the conversation
         )
         self.db.add(db_conversation)
         
@@ -137,7 +132,7 @@ class ConversationRepository(BaseRepository[Conversation]):
         return ConversationDto(
             id=conversation.id,
             name=conversation.name,
-            user_username=conversation.user_username,
+            user_email=conversation.user_email,
             shared_state=conversation.shared_state,
             threads=conversation.threads,
             settings=conversation.settings
@@ -190,6 +185,17 @@ class ConversationRepository(BaseRepository[Conversation]):
         conversation.shared_state = shared_state
         self.db.commit()
         self.db.refresh(conversation)
+
+
+    def update_conversation(self, conversation_id: str) -> Optional[Conversation]:
+        """Manually update the `updated_at` timestamp for a conversation."""
+        updated = self.db.query(Conversation).filter(
+            Conversation.id == conversation_id
+        ).update(
+            {Conversation.updated_at: func.now()}
+        )
+        if updated:
+            self.db.commit()
 
 class MessageRepository(BaseRepository[Message]):
     """Repository for Message entity."""
@@ -257,14 +263,16 @@ class MessageRepository(BaseRepository[Message]):
         result = self.db.execute(query)
         return len(result.scalars().all())
     
-    def create_from_dto(self, dto: SendMessageDto, sender_username: str, is_from_agency: bool = False) -> Message:
+    def create_from_dto(self, dto: SendMessageDto, sender_email: str, is_from_agency: bool = False) -> Message:
         """Create a message from DTO."""
         message = Message(
             content=dto.content,
             conversation_id=dto.conversation_id,
-            sender_username=sender_username,
+            sender_email=sender_email,
             is_from_agency=is_from_agency
         )
+        conversation_repo = ConversationRepository(self.db)
+        conversation_repo.update_conversation(dto.conversation_id)
         self.db.add(message)
         self.db.commit()
         self.db.refresh(message)
@@ -275,7 +283,7 @@ class MessageRepository(BaseRepository[Message]):
         message = Message(
             content=content,
             conversation_id=conversation_id,
-            sender_username=None,
+            sender_email=None,
             is_from_agency=is_from_agency
         )
         self.db.add(message)

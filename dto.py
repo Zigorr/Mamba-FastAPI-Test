@@ -28,21 +28,13 @@ class BaseDto(BaseModel, Generic[T]):
 
 class TokenData(BaseModel):
     """Data model for JWT token payload."""
-    username: Optional[str] = None
+    email: Optional[str] = None
 
 class CreateUserDto(BaseDto):
-    username: str
     first_name: str
     last_name: str
     email: EmailStr
     password: str
-    
-    @field_validator('username')
-    @classmethod
-    def validate_username(cls, v):
-        if not re.match(r'^[a-zA-Z0-9]+$', v):
-            raise ValueError('Username must not contain spaces or special characters')
-        return v
     
     @field_validator('first_name', 'last_name')
     @classmethod
@@ -66,7 +58,6 @@ class CreateUserDto(BaseDto):
         return v
 
 class UserDto(BaseDto):
-    username: str
     first_name: str
     last_name: str
     email: EmailStr
@@ -75,7 +66,7 @@ class UserDto(BaseDto):
         from_attributes = True
 
 class LoginDto(BaseDto):
-    username: str
+    email: EmailStr
     password: str
 
 # New DTOs for concurrency features
@@ -83,7 +74,7 @@ class LoginDto(BaseDto):
 class ConversationDto(BaseDto):
     id: str
     name: str
-    user_username: str
+    user_email: str
     shared_state: Optional[Dict[str, Any]] = None
     threads: Optional[Dict[str, Any]] = None
     settings: Optional[List[Dict[str, Any]]] = None
@@ -138,7 +129,7 @@ class MessageDto(BaseDto):
         return MessageDto(
             id=str(message.id),
             conversation_id=message.conversation_id,
-            sender=message.sender_username,
+            sender=message.sender_email,
             content=message.content,
             is_from_agency=message.is_from_agency,
             timestamp=message.timestamp.isoformat() if message.timestamp else None
@@ -148,7 +139,7 @@ class MessageDto(BaseDto):
         """Convert DTO to dict suitable for database."""
         result = {
             'conversation_id': self.conversation_id,
-            'sender_username': self.sender,
+            'sender_email': self.sender,
             'content': self.content,
             'is_from_agency': self.is_from_agency
         }
@@ -163,11 +154,11 @@ class SendMessageDto(BaseDto):
     conversation_id: str
     content: str
     
-    def to_db_dict(self, sender_username):
+    def to_db_dict(self, sender_email):
         """Convert to dict suitable for creating a Message model."""
         return {
             'conversation_id': self.conversation_id,
-            'sender_username': sender_username,
+            'sender_email': sender_email,
             'content': self.content,
             'is_from_agency': False
         }

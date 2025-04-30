@@ -11,6 +11,7 @@ from typing import Dict
 import certifi
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
+from datetime import datetime
 
 # State and Auth
 import auth
@@ -29,7 +30,7 @@ from models import Base, User
 from repositories import ConversationRepository, MessageRepository, UserRepository
 
 # Agency
-from ClientManagementAgency.agency import initialize_agency
+from services.agency_services import initialize_agency
 
 load_dotenv(override=True)
 os.environ["SSL_CERT_FILE"] = certifi.where()
@@ -84,7 +85,7 @@ async def create_chat(
     # Verify token and get current user
     try:
         current_user = await get_current_user(token=token, db=db)
-        logger.info(f"User {current_user.username} authenticated for new conversation")
+        logger.info(f"User {current_user.email} authenticated for new conversation")
     except HTTPException as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -101,12 +102,13 @@ async def create_chat(
 
     # Create new conversation
     conversation_repo = ConversationRepository(db)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conversation = conversation_repo.create_from_dto(
-        CreateConversationDto(name=f"Chat with {current_user.username}"),
-        creator_username=current_user.username
+        CreateConversationDto(name=f"Chat @{timestamp}"),
+        creator_email=current_user.email
     )
 
-    logger.info(f"Created new conversation {conversation.id} for user {current_user.username}")
+    logger.info(f"Created new conversation {conversation.id} for user {current_user.email}")
 
     # Forward the message to the chat endpoint
     response = await chat_endpoint(
@@ -129,7 +131,7 @@ async def chat_endpoint(
     # Verify token and get current user
     try:
         current_user = await get_current_user(token=token, db=db)
-        logger.info(f"User {current_user.username} authenticated")
+        logger.info(f"User {current_user.email} authenticated")
     except HTTPException as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -155,45 +157,58 @@ async def chat_endpoint(
             detail="Conversation not found"
         )
     
-    if conversation.user_username != current_user.username:
+    if conversation.user_email != current_user.email:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have access to this conversation"
         )
 
-    logger.info(f"Received message from client {current_user.username} for conversation {conversation_id}: {message}")
+    logger.info(f"Received message from client {current_user.email} for conversation {conversation_id}: {message}")
 
     # Save user message to database
     user_message_dto = SendMessageDto(
         conversation_id=conversation_id,
         content=message
     )
-    message_repo.create_from_dto(user_message_dto, current_user.username, is_from_agency=False)
+    message_repo.create_from_dto(user_message_dto, current_user.email, is_from_agency=False)
 
     # Initialize or load agency
     agency = initialize_agency(conversation_id, conversation_repo)
 
     try:
         # Get completion from agency
-        response = agency.get_completion(message=message)
+        agency_response = agency.get_completion(message=message)
         
-        # Save updated state
-        conversation_repo.save_shared_state(conversation_id, agency.shared_state.data)
         
         # Save AI response to database
         ai_message_dto = SendMessageDto(
             conversation_id=conversation_id,
-            content=response
+            content=agency_response
         )
         message_repo.create_from_dto(ai_message_dto, None, is_from_agency=True)
         
-        return {"response": response, "is_from_agency": True}
+        agency_action = agency.shared_state.get("action")
+        if agency_action:
+            response = {
+                "response": agency_response, 
+                "is_from_agency": True, 
+                "action": agency_action
+            }
+        else:
+            response = {
+                "response": agency_response, "is_from_agency": True}
+            
+        if agency_action and agency_action.get("action-type") == "keywords_ready":
+            agency.shared_state.set("action", None)
+        # Save updated state
+        conversation_repo.save_shared_state(conversation_id, agency.shared_state.data)
     except Exception as e:
         logger.error(f"Error processing message for {conversation_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error processing message: {str(e)}"
         )
+    return response
 
 @app.get("/messages/{conversation_id}", tags=["Chat"])
 async def get_messages_flexible(
@@ -214,7 +229,7 @@ async def get_messages_flexible(
     # Verify token and get current user
     try:
         current_user = await get_current_user(token=token, db=db)
-        logger.info(f"User {current_user.username} accessing messages for conversation {conversation_id}")
+        logger.info(f"User {current_user.email} accessing messages for conversation {conversation_id}")
     except HTTPException as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -230,7 +245,7 @@ async def get_messages_flexible(
             detail="Conversation not found"
         )
     
-    if conversation.user_username != current_user.username:
+    if conversation.user_email != current_user.email:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have access to this conversation"
@@ -256,6 +271,16 @@ async def get_messages_flexible(
     
     # Convert to DTOs
     message_dtos = [message_repo.to_dto(message) for message in messages]
+
+    agency = initialize_agency(conversation_id, conversation_repo)
+
+    latest_action = agency.shared_state.get("action", None)
+
+    keyword_tables = agency.shared_state.get("keywords_output", None)
+    generated_content = {}
+    
+    if keyword_tables:
+        generated_content["keyword_tables"] = keyword_tables
     
     return {
         "messages": message_dtos, 
@@ -263,7 +288,9 @@ async def get_messages_flexible(
         "total_count": message_repo.count_for_conversation(conversation_id),
         "order": order,
         "limit": limit,
-        "offset": offset
+        "offset": offset,
+        "generated_content": generated_content,
+        "action": latest_action
     }
 
 @app.get("/conversations", tags=["Chat"])
@@ -277,7 +304,7 @@ async def get_user_conversations(
     # Verify token and get current user
     try:
         current_user = await get_current_user(token=token, db=db)
-        logger.info(f"User {current_user.username} retrieving conversations")
+        logger.info(f"User {current_user.email} retrieving conversations")
     except HTTPException as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -288,7 +315,7 @@ async def get_user_conversations(
     conversation_repo = ConversationRepository(db)
     message_repo = MessageRepository(db)
     
-    conversations = conversation_repo.get_for_user(current_user.username, limit, offset)
+    conversations = conversation_repo.get_for_user(current_user.email, limit, offset)
     result = []
     
     # For each conversation, get the latest message
@@ -305,10 +332,154 @@ async def get_user_conversations(
     
     return {"conversations": result}
 
+@app.post("/submit_form/{conversation_id}", tags=["Chat"])
+async def submit_form(
+    conversation_id: str,
+    request: dict,
+    token: str = Depends(get_token_header),
+    db: Session = Depends(get_db)
+):
+    """Submit a form for a conversation."""
+    # Verify token and get current user
+    try:
+        current_user = await get_current_user(token=token, db=db)
+        logger.info(f"User {current_user.email} authenticated")
+    except HTTPException as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Authentication failed: {e.detail}"
+        )
+
+    # Get message from request
+    form_data = request.get("form_data")
+    form_action = request.get("action", None)
+    if not form_data:
+        if form_action == "cancel_form":
+            message = "I have cancelled the form"
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Form data is required"
+            )
+
+    conversation_repo = ConversationRepository(db)
+    message_repo = MessageRepository(db)  # Create message repository
+
+    # Validate that the conversation belongs to the current user
+    conversation = conversation_repo.get_by_id(conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found"
+        )
+    
+    if conversation.user_email != current_user.email:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this conversation"
+        )
+
+    logger.info(f"Received business form data from client {current_user.email} for conversation {conversation_id}")
+    message = "I have submitted the form"
+    # Save user message to database
+    user_message_dto = SendMessageDto(
+        conversation_id=conversation_id,
+        content=message
+    )
+    message_repo.create_from_dto(user_message_dto, current_user.email, is_from_agency=False)
+
+    # Initialize or load agency
+    agency = initialize_agency(conversation_id, conversation_repo)
+
+    try:
+        # Set the form data in the shared state
+        if form_data:
+            agency.shared_state.set('business_info_data', form_data)
+        if form_action == "cancel_form":
+            agency.shared_state.set('action', None)
+        # Get completion from agency
+        agency_response = agency.get_completion(message=message)
+        
+        # Save updated state
+        conversation_repo.save_shared_state(conversation_id, agency.shared_state.data)
+        
+        # Save AI response to database
+        ai_message_dto = SendMessageDto(
+            conversation_id=conversation_id,
+            content=agency_response
+        )
+        message_repo.create_from_dto(ai_message_dto, None, is_from_agency=True)
+        
+        if agency.shared_state.get("action"):
+            action = agency.shared_state.get("action")
+            return {"response": agency_response, "is_from_agency": True, "action": action}
+        else:
+            return {"response": agency_response, "is_from_agency": True}
+    except Exception as e:
+        logger.error(f"Error processing message for {conversation_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error processing message: {str(e)}"
+        )
+@app.post("/get_keywords/{conversation_id}", tags=["Chat"])
+async def get_keywords(
+    conversation_id: str,
+    request: dict,
+    token: str = Depends(get_token_header),
+    db: Session = Depends(get_db)
+):
+    # Verify token and get current user
+    try:
+        current_user = await get_current_user(token=token, db=db)
+        logger.info(f"User {current_user.email} authenticated")
+    except HTTPException as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Authentication failed: {e.detail}"
+        )
+
+    # Get message from request
+    table_id = request.get("table_id")
+    if not table_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Table ID is required"
+        )
+
+    conversation_repo = ConversationRepository(db)
+
+    # Validate that the conversation belongs to the current user
+    conversation = conversation_repo.get_by_id(conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found"
+        )
+    
+    if conversation.user_email != current_user.email:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this conversation"
+        )
+
+    logger.info(f"Received business form data from client {current_user.email} for conversation {conversation_id}")
+
+    agency = initialize_agency(conversation_id, conversation_repo)
+    keywords_output = agency.shared_state.get('keywords_output')
+    table_data = keywords_output.get(table_id)
+    if not table_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Table ID not found"
+        )
+    agency.shared_state.set('action', None)
+    conversation_repo.save_shared_state(conversation_id, agency.shared_state.data)
+
+    return table_data
+
 if __name__ == "__main__":
     print("Starting FastAPI server...")
     print("Ensure .env file has OPENAI_API_KEY and SECRET_KEY")
-    print(f"Default user: testuser (no password needed)")
     print("Access the chat interface at http://localhost:8000")
     
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
