@@ -11,6 +11,7 @@ from typing import Dict
 import certifi
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
+from datetime import datetime
 
 # State and Auth
 import auth
@@ -101,8 +102,9 @@ async def create_chat(
 
     # Create new conversation
     conversation_repo = ConversationRepository(db)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conversation = conversation_repo.create_from_dto(
-        CreateConversationDto(name=f"Chat with {current_user.first_name}"),
+        CreateConversationDto(name=f"New Chat {timestamp}"),
         creator_email=current_user.email
     )
 
