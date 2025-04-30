@@ -114,7 +114,7 @@ class BoFuListTool(BaseTool):
         # --- End Save the results to shared state --- 
 
         keywords_ready = {
-            "table_id": table_id
+            "table": table_dict
         }
         action = {
             "action-type": "keywords_ready",
