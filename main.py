@@ -271,10 +271,11 @@ async def get_messages_flexible(
     message_dtos = [message_repo.to_dto(message) for message in messages]
 
     agency = initialize_agency(conversation_id, conversation_repo)
-    keyword_tables = agency.shared_state.get("keywords_output")
-    generated_content = {
-        "keyword_tables": keyword_tables
-    }
+    keyword_tables = agency.shared_state.get("keywords_output", None)
+    generated_content = {}
+    
+    if keyword_tables:
+        generated_content["keyword_tables"] = keyword_tables
     
     return {
         "messages": message_dtos, 
