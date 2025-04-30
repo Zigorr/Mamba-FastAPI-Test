@@ -191,7 +191,7 @@ class ConversationRepository(BaseRepository[Conversation]):
         """Manually update the `updated_at` timestamp for a conversation."""
         updated = self.db.query(Conversation).filter(
             Conversation.id == conversation_id
-        ).first().update(
+        ).update(
             {Conversation.updated_at: func.now()}
         )
         if updated:
