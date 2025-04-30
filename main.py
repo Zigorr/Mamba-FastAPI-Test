@@ -396,6 +396,59 @@ async def submit_form(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error processing message: {str(e)}"
         )
+@app.get("/get_keywords/{conversation_id}", tags=["Chat"])
+async def get_keywords(
+    conversation_id: str,
+    request: dict,
+    token: str = Depends(get_token_header),
+    db: Session = Depends(get_db)
+):
+    # Verify token and get current user
+    try:
+        current_user = await get_current_user(token=token, db=db)
+        logger.info(f"User {current_user.email} authenticated")
+    except HTTPException as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Authentication failed: {e.detail}"
+        )
+
+    # Get message from request
+    table_id = request.get("table_id")
+    if not table_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Table ID is required"
+        )
+
+    conversation_repo = ConversationRepository(db)
+
+    # Validate that the conversation belongs to the current user
+    conversation = conversation_repo.get_by_id(conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found"
+        )
+    
+    if conversation.user_email != current_user.email:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this conversation"
+        )
+
+    logger.info(f"Received business form data from client {current_user.email} for conversation {conversation_id}")
+
+    agency = initialize_agency(conversation_id, conversation_repo)
+    keywords_output = agency.shared_state.get('keywords_output')
+    table_data = keywords_output.get(table_id)
+    if not table_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Table ID not found"
+        )
+
+    return table_data
 
 if __name__ == "__main__":
     print("Starting FastAPI server...")

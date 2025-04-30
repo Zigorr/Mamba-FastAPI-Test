@@ -18,7 +18,11 @@ class CollectBusinessInfoTool(BaseTool):
         """
         try:
             # 1. Tell the UI to show the form
-            self._shared_state.set('action', 'collect_business_info')
+            action = {
+                "action-type": "collect_business_info",
+                "action-data": {}
+            }
+            self._shared_state.set('action', action)
             return "Successfully triggered the UI to display the form. Prompt the user to fill out the form and submit."
         except Exception as e:
             return f"An unexpected error occurred: {e}"
