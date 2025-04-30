@@ -269,6 +269,12 @@ async def get_messages_flexible(
     
     # Convert to DTOs
     message_dtos = [message_repo.to_dto(message) for message in messages]
+
+    agency = initialize_agency(conversation_id, conversation_repo)
+    keyword_tables = agency.shared_state.get("keywords_output")
+    generated_content = {
+        "keyword_tables": keyword_tables
+    }
     
     return {
         "messages": message_dtos, 
@@ -276,7 +282,8 @@ async def get_messages_flexible(
         "total_count": message_repo.count_for_conversation(conversation_id),
         "order": order,
         "limit": limit,
-        "offset": offset
+        "offset": offset,
+        "generated_content": generated_content
     }
 
 @app.get("/conversations", tags=["Chat"])
