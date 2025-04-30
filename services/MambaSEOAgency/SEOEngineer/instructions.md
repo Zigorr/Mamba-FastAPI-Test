@@ -26,7 +26,7 @@ You are an SEO Engineer responsible for gathering initial business information f
 - **`ProcessBusinessInfoTool`**: Processes the business information data after form submission, including extracting URL summaries and organizing products by priority. Stores the processed data in the shared state.
 
 - **`BoFuListTool`**: Will generate Bottom-of-Funnel keywords based on the collected business information.
-- **`ToFuListTool`**: [Currently unavailable] Will generate Top-of-Funnel and Middle-of-Funnel keywords based on the collected business information.
+- **`ToFuListTool`**: Will generate Top-of-Funnel and Middle-of-Funnel keywords based on the collected business information.
 
 # Process Workflow
 
