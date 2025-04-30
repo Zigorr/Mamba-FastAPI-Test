@@ -104,7 +104,7 @@ async def create_chat(
     conversation_repo = ConversationRepository(db)
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conversation = conversation_repo.create_from_dto(
-        CreateConversationDto(name=f"New Chat {timestamp}"),
+        CreateConversationDto(name=f"Chat @{timestamp}"),
         creator_email=current_user.email
     )
 
