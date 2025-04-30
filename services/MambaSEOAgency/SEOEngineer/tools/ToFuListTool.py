@@ -222,65 +222,30 @@ class ToFuListTool(BaseTool):
 if __name__ == "__main__":
     import glob
 
-    tool = BoFuListTool()
+    tool = ToFuListTool()
 
-    # --- Mocking shared_state for local testing ---
-    class MockSharedState:
-        def __init__(self):
-            self._state = {}
-        def set(self, key, value):
-            print(f"[MockSharedState] Setting key '{key}'")
-            self._state[key] = value
-        def get(self, key, default=None):
-            return self._state.get(key, default)
-        def get_all(self):
-            return self._state.copy()
-    tool._shared_state = MockSharedState() # Assign mock directly
-    # --- End Mocking ---
 
-    # Find the most recent business form data
-    business_form_files = glob.glob("../../business_form/*/data.json") # Adjust path relative to tool location
-    if business_form_files:
-        latest_file = max(business_form_files, key=os.path.getmtime)
-        try:
-            with open(latest_file, 'r') as f:
-                business_data = json.load(f)
-                # Convert products_services to DataFrame for the mock state
-                if 'products_services' in business_data and isinstance(business_data['products_services'], list):
-                    business_data['products_services'] = pd.DataFrame(business_data['products_services'])
-                tool._shared_state.set('business_info_data', business_data) # Use the mock set method
-                print(f"Loaded business data from {latest_file} into mock shared state.")
-        except Exception as e:
-            print(f"Error loading business data for testing: {str(e)}")
-    else:
-        print("No business form data found for testing. Using default mock data.")
-        # Provide default mock data if no file found
-        mock_business_data = {
-            'company_name': 'Test Co',
-            'website': 'http://example.com',
-            'niche': 'Testing',
-            'location': 'United States',
-            'target_personas': 'Testers',
-            'market_geo': 'United States', # Default for mock
-            'value_props': 'Great tests',
-            'products_services': pd.DataFrame([{
+    # Provide default mock data if no file found
+    mock_business_data = {
+        'company_name': 'Test Co',
+        'website': 'http://example.com',
+        'niche': 'Testing',
+        'location': 'United States',
+        'target_personas': 'Testers',
+        'market_geo': 'United States', # Default for mock
+        'value_props': 'Great tests',
+        'products_services': [
+            {
                 'name': 'Mock Product',
                 'url': '',
                 'description': 'A product for mocking.',
                 'target_persona': 'Mock users',
                 'priority': '5'
-            }])
-        }
-        tool._shared_state.set('business_info_data', mock_business_data)
+            }
+        ]
+    }
+    tool._shared_state.set('business_info_data', mock_business_data)
 
     # Run the tool
     response = tool.run()
     print(f"\nTool Run Response:\n{response}")
-
-    # Print the resulting DataFrame from mock shared state
-    final_df = tool._shared_state.get('bofu_keywords')
-    if isinstance(final_df, pd.DataFrame):
-        print("\nGenerated Keywords DataFrame (from mock shared state):")
-        print(final_df.to_string())
-    else:
-        print("\nNo keywords DataFrame found in mock shared state.")
