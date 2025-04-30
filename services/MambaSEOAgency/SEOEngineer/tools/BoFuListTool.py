@@ -114,7 +114,6 @@ class BoFuListTool(BaseTool):
         # --- End Save the results to shared state --- 
 
         keywords_ready = {
-            "state": True,
             "table_id": table_id
         }
         action = {
