@@ -7,10 +7,9 @@ import datetime
 class User(Base):
     __tablename__ = "users"
 
-    username = Column(String, primary_key=True, index=True)
+    email = Column(String, primary_key=True, index=True)
     first_name = Column(String)
     last_name = Column(String)
-    email = Column(String, unique=True, index=True)
     password = Column(String)
     # Relationships
     conversations = relationship("Conversation", back_populates="user", cascade="all, delete-orphan")
@@ -29,7 +28,7 @@ class Conversation(Base):
     id = Column(String, primary_key=True, index=True)
     name = Column(String)
     # Foreign key to user
-    user_username = Column(String, ForeignKey("users.username"), nullable=False)
+    user_email = Column(String, ForeignKey("users.email"), nullable=False)
     # New JSON fields for state storage
     shared_state = Column(JSON, nullable=True, default={})
     threads = Column(JSON, nullable=True, default={})
@@ -42,7 +41,7 @@ class Conversation(Base):
     
     # Add index to improve query performance on frequently filtered fields
     __table_args__ = (
-        Index('idx_conv_user_updated', 'user_username', 'updated_at'),
+        Index('idx_conv_user_updated', 'user_email', 'updated_at'),
     )
 
 class Message(Base):
@@ -53,7 +52,7 @@ class Message(Base):
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
     is_from_agency = Column(Boolean, default=False)
     conversation_id = Column(String, ForeignKey("conversations.id"))
-    sender_username = Column(String, ForeignKey("users.username"), nullable=True)
+    sender_email = Column(String, ForeignKey("users.email"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     

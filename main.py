@@ -84,7 +84,7 @@ async def create_chat(
     # Verify token and get current user
     try:
         current_user = await get_current_user(token=token, db=db)
-        logger.info(f"User {current_user.username} authenticated for new conversation")
+        logger.info(f"User {current_user.email} authenticated for new conversation")
     except HTTPException as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -102,11 +102,11 @@ async def create_chat(
     # Create new conversation
     conversation_repo = ConversationRepository(db)
     conversation = conversation_repo.create_from_dto(
-        CreateConversationDto(name=f"Chat with {current_user.username}"),
-        creator_username=current_user.username
+        CreateConversationDto(name=f"Chat with {current_user.first_name}"),
+        creator_email=current_user.email
     )
 
-    logger.info(f"Created new conversation {conversation.id} for user {current_user.username}")
+    logger.info(f"Created new conversation {conversation.id} for user {current_user.email}")
 
     # Forward the message to the chat endpoint
     response = await chat_endpoint(
@@ -129,7 +129,7 @@ async def chat_endpoint(
     # Verify token and get current user
     try:
         current_user = await get_current_user(token=token, db=db)
-        logger.info(f"User {current_user.username} authenticated")
+        logger.info(f"User {current_user.email} authenticated")
     except HTTPException as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -155,20 +155,20 @@ async def chat_endpoint(
             detail="Conversation not found"
         )
     
-    if conversation.user_username != current_user.username:
+    if conversation.user_email != current_user.email:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have access to this conversation"
         )
 
-    logger.info(f"Received message from client {current_user.username} for conversation {conversation_id}: {message}")
+    logger.info(f"Received message from client {current_user.email} for conversation {conversation_id}: {message}")
 
     # Save user message to database
     user_message_dto = SendMessageDto(
         conversation_id=conversation_id,
         content=message
     )
-    message_repo.create_from_dto(user_message_dto, current_user.username, is_from_agency=False)
+    message_repo.create_from_dto(user_message_dto, current_user.email, is_from_agency=False)
 
     # Initialize or load agency
     agency = initialize_agency(conversation_id, conversation_repo)
@@ -218,7 +218,7 @@ async def get_messages_flexible(
     # Verify token and get current user
     try:
         current_user = await get_current_user(token=token, db=db)
-        logger.info(f"User {current_user.username} accessing messages for conversation {conversation_id}")
+        logger.info(f"User {current_user.email} accessing messages for conversation {conversation_id}")
     except HTTPException as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -234,7 +234,7 @@ async def get_messages_flexible(
             detail="Conversation not found"
         )
     
-    if conversation.user_username != current_user.username:
+    if conversation.user_email != current_user.email:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have access to this conversation"
@@ -281,7 +281,7 @@ async def get_user_conversations(
     # Verify token and get current user
     try:
         current_user = await get_current_user(token=token, db=db)
-        logger.info(f"User {current_user.username} retrieving conversations")
+        logger.info(f"User {current_user.email} retrieving conversations")
     except HTTPException as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -292,7 +292,7 @@ async def get_user_conversations(
     conversation_repo = ConversationRepository(db)
     message_repo = MessageRepository(db)
     
-    conversations = conversation_repo.get_for_user(current_user.username, limit, offset)
+    conversations = conversation_repo.get_for_user(current_user.email, limit, offset)
     result = []
     
     # For each conversation, get the latest message
@@ -320,7 +320,7 @@ async def submit_form(
     # Verify token and get current user
     try:
         current_user = await get_current_user(token=token, db=db)
-        logger.info(f"User {current_user.username} authenticated")
+        logger.info(f"User {current_user.email} authenticated")
     except HTTPException as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -350,20 +350,20 @@ async def submit_form(
             detail="Conversation not found"
         )
     
-    if conversation.user_username != current_user.username:
+    if conversation.user_email != current_user.email:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have access to this conversation"
         )
 
-    logger.info(f"Received business form data from client {current_user.username} for conversation {conversation_id}")
+    logger.info(f"Received business form data from client {current_user.email} for conversation {conversation_id}")
     message = "I have submitted the form"
     # Save user message to database
     user_message_dto = SendMessageDto(
         conversation_id=conversation_id,
         content=message
     )
-    message_repo.create_from_dto(user_message_dto, current_user.username, is_from_agency=False)
+    message_repo.create_from_dto(user_message_dto, current_user.email, is_from_agency=False)
 
     # Initialize or load agency
     agency = initialize_agency(conversation_id, conversation_repo)
@@ -400,7 +400,6 @@ async def submit_form(
 if __name__ == "__main__":
     print("Starting FastAPI server...")
     print("Ensure .env file has OPENAI_API_KEY and SECRET_KEY")
-    print(f"Default user: testuser (no password needed)")
     print("Access the chat interface at http://localhost:8000")
     
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
