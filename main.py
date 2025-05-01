@@ -1,5 +1,5 @@
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status, Query, Header
+from fastapi import FastAPI, Depends, HTTPException, status, Query, Request, Response
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 import os
@@ -53,14 +53,16 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://178.128.90.137, https://front-genta.xyz"],  # Allows all origins
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],  # Allows all methods
-    allow_headers=["Content-Type", "Authorization"],  # Allows all headers
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
 )
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
-
+@app.options("/{path:path}")
+async def preflight(full_path: str, request: Request) -> Response:
+    return Response(status_code=204)
 
 @app.get("/")
 async def read_root():
