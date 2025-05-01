@@ -59,9 +59,10 @@ app.add_middleware(
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
-# @app.options("/{path:path}")
-# async def preflight(full_path: str, request: Request) -> Response:
-#     return Response(status_code=204)
+@app.options("/{path:path}")
+async def preflight(full_path: str, request: Request) -> Response:
+    return Response(status_code=204)
+
 
 @app.get("/")
 async def read_root():
