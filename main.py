@@ -1,17 +1,16 @@
-import uvicorn
-from fastapi import FastAPI, Depends, HTTPException, status, Query, Request, Response
-from fastapi.responses import HTMLResponse
-from fastapi.middleware.cors import CORSMiddleware
+import uvicorn # type: ignore
+from fastapi import FastAPI, Depends, HTTPException, status, Query, Request, Response # type: ignore
+from fastapi.responses import HTMLResponse # type: ignore
+from fastapi.middleware.cors import CORSMiddleware # type: ignore
 import os
-from dotenv import load_dotenv
-import asyncio
+from dotenv import load_dotenv # type: ignore
 import logging
-import pickle
 from typing import Dict
-import certifi
-from sqlalchemy.orm import Session
-from passlib.context import CryptContext
+import certifi # type: ignore
+from sqlalchemy.orm import Session # type: ignore
+from passlib.context import CryptContext # type: ignore
 from datetime import datetime
+from reset_database import reset_database
 
 # State and Auth
 import auth
@@ -63,6 +62,11 @@ Base.metadata.create_all(bind=engine)
 @app.options("/{path:path}")
 async def preflight(full_path: str, request: Request) -> Response:
     return Response(status_code=204)
+
+@app.get("/reset_database")
+async def reset_database_endpoint():
+    reset_database()
+    return {"message": "Database reset successfully"}
 
 @app.get("/")
 async def read_root():
