@@ -63,11 +63,6 @@ Base.metadata.create_all(bind=engine)
 # async def preflight(full_path: str, request: Request) -> Response:
 #     return Response(status_code=204)
 
-@app.get("/reset_database")
-async def reset_database_endpoint():
-    reset_database()
-    return {"message": "Database reset successfully"}
-
 @app.get("/")
 async def read_root():
      return {"message": "Welcome to the Mamba FastAPI"}
