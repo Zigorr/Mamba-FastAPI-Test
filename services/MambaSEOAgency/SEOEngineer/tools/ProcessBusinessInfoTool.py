@@ -4,7 +4,6 @@ from agency_swarm.tools import BaseTool
 from pydantic import Field
 
 from dotenv import load_dotenv
-import pandas as pd
 
 
 from api_clients import FireCrawlClient

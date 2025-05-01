@@ -3,7 +3,6 @@ import os
 from agency_swarm.tools import BaseTool
 from pydantic import Field
 import json
-import pandas as pd
 from datetime import datetime
 # Add the project root to the Python path
 
