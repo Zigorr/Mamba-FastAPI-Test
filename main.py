@@ -50,10 +50,10 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://178.128.90.137, https://front-genta.xyz"],  # Allows all origins
+    allow_origins=["http://178.128.90.137, https://front-genta.xyz"],  # Or restrict to your frontend URL like ["https://yourfrontend.com"]
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"],  # Allows all headers
+    allow_methods=["GET", "POST", "OPTIONS", "PUT", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # Create database tables
