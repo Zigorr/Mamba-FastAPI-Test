@@ -29,7 +29,7 @@ from models import Base, User
 from repositories import ConversationRepository, MessageRepository, UserRepository
 
 # Agency
-from services.agency_services import initialize_agency
+from services.agency_services import AgencyService
 
 load_dotenv(override=True)
 os.environ["SSL_CERT_FILE"] = certifi.where()
@@ -175,7 +175,7 @@ async def chat_endpoint(
     message_repo.create_from_dto(user_message_dto, current_user.email, is_from_agency=False)
 
     # Initialize or load agency
-    agency = initialize_agency(conversation_id, conversation_repo)
+    agency = AgencyService.initialize_agency(conversation_id, conversation_repo)
 
     try:
         # Get completion from agency
@@ -274,7 +274,7 @@ async def get_messages_flexible(
     # Convert to DTOs
     message_dtos = [message_repo.to_dto(message) for message in messages]
 
-    agency = initialize_agency(conversation_id, conversation_repo)
+    agency = AgencyService.initialize_agency(conversation_id, conversation_repo)
 
     latest_action = agency.shared_state.get("action", None)
 
@@ -391,7 +391,7 @@ async def submit_form(
     message_repo.create_from_dto(user_message_dto, current_user.email, is_from_agency=False)
 
     # Initialize or load agency
-    agency = initialize_agency(conversation_id, conversation_repo)
+    agency = AgencyService.initialize_agency(conversation_id, conversation_repo)
 
     try:
         # Set the form data in the shared state
@@ -466,7 +466,7 @@ async def get_keywords(
 
     logger.info(f"Received business form data from client {current_user.email} for conversation {conversation_id}")
 
-    agency = initialize_agency(conversation_id, conversation_repo)
+    agency = AgencyService.initialize_agency(conversation_id, conversation_repo)
     keywords_output = agency.shared_state.get('keywords_output')
     table_data = keywords_output.get(table_id)
     if not table_data:
