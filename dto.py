@@ -79,6 +79,7 @@ class ConversationDto(BaseDto):
     threads: Optional[Dict[str, Any]] = None
     settings: Optional[List[Dict[str, Any]]] = None
     latest_message: Optional["MessageDto"] = None
+    is_pinned: Optional[bool] = False
     
     model_config = {
         "arbitrary_types_allowed": True,

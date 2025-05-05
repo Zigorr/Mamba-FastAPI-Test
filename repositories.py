@@ -114,18 +114,18 @@ class ConversationRepository(BaseRepository[Conversation]):
                       otherwise descending (newest first)
         
         Returns:
-            List of conversations
+            List of conversations, with pinned conversations first, then sorted by updated_at
         """
-        # Base query
+        # Base query for user's conversations
         query = self.db.query(Conversation).filter(
             Conversation.user_email == email
         )
         
-        # Apply ordering
+        # Sort by is_pinned (True first) and then by updated_at
         if ascending:
-            query = query.order_by(Conversation.updated_at.asc())
+            query = query.order_by(Conversation.is_pinned.desc(), Conversation.updated_at.asc())
         else:
-            query = query.order_by(Conversation.updated_at.desc())
+            query = query.order_by(Conversation.is_pinned.desc(), Conversation.updated_at.desc())
         
         # Apply offset if specified
         if offset > 0:
@@ -164,7 +164,8 @@ class ConversationRepository(BaseRepository[Conversation]):
             user_email=conversation.user_email,
             shared_state=conversation.shared_state,
             threads=conversation.threads,
-            settings=conversation.settings
+            settings=conversation.settings,
+            is_pinned=conversation.is_pinned
         )
     
     def update_state(self, conversation_id: str, state_data: Dict[str, Any]) -> Optional[Conversation]:
@@ -233,6 +234,26 @@ class ConversationRepository(BaseRepository[Conversation]):
             self.db.commit()
             return True
         return False
+
+    def toggle_pin(self, conversation_id: str) -> Optional[Conversation]:
+        """Toggle the pinned status of a conversation.
+        
+        Args:
+            conversation_id: The ID of the conversation to toggle
+            
+        Returns:
+            Updated conversation or None if not found
+        """
+        conversation = self.get_by_id(conversation_id)
+        if not conversation:
+            return None
+        
+        # Toggle the is_pinned status
+        conversation.is_pinned = not conversation.is_pinned
+        
+        self.db.commit()
+        self.db.refresh(conversation)
+        return conversation
 
 class MessageRepository(BaseRepository[Message]):
     """Repository for Message entity."""

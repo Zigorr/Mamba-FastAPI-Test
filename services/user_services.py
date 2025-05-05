@@ -370,7 +370,7 @@ async def get_user_conversations(current_user_email: str, db: Session = None):
         db: Database session
         
     Returns:
-        List of conversations with essential details (id, name, updated_at)
+        List of conversations with essential details (id, name, updated_at, is_pinned)
         sorted by updated_at (newest first)
     """
     logger = logging.getLogger(__name__)
@@ -389,7 +389,8 @@ async def get_user_conversations(current_user_email: str, db: Session = None):
         conversation_list.append({
             "id": conversation.id,
             "name": conversation.name,
-            "updated_at": conversation.updated_at
+            "updated_at": conversation.updated_at,
+            "is_pinned": conversation.is_pinned
         })
     
     logger.info(f"Retrieved {len(conversation_list)} conversations for user {current_user_email}")
@@ -398,3 +399,59 @@ async def get_user_conversations(current_user_email: str, db: Session = None):
         "conversations": conversation_list,
         "total": len(conversation_list)
     }
+
+async def toggle_conversation_pin(conversation_id: str, current_user_email: str, db: Session):
+    """
+    Toggle the 'pinned' status of a conversation.
+    
+    Args:
+        conversation_id: ID of the conversation to toggle
+        current_user_email: Email of the authenticated user
+        db: Database session
+        
+    Returns:
+        Updated conversation DTO
+        
+    Raises:
+        HTTPException: If conversation not found or user lacks permission
+    """
+    logger = logging.getLogger(__name__)
+    conversation_repo = ConversationRepository(db)
+    
+    # Find the conversation
+    conversation = conversation_repo.get_by_id(conversation_id)
+    if not conversation:
+        logger.warning(f"Conversation {conversation_id} not found for toggle pin operation")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found"
+        )
+    
+    # Authorization Check: Ensure the current user owns the conversation
+    if conversation.user_email != current_user_email:
+        logger.warning(f"User {current_user_email} forbidden to toggle pin for conversation {conversation_id} owned by {conversation.user_email}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to pin/unpin this conversation"
+        )
+    
+    # Toggle the pin status
+    try:
+        updated_conversation = conversation_repo.toggle_pin(conversation_id)
+        if updated_conversation:
+            new_status = "pinned" if updated_conversation.is_pinned else "unpinned"
+            logger.info(f"Conversation {conversation_id} {new_status} by user {current_user_email}")
+            return conversation_repo.to_dto(updated_conversation)
+        else:
+            # This should not happen since we already checked if conversation exists
+            logger.error(f"Conversation {conversation_id} found but toggle pin failed.")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+                detail="Failed to update conversation pin status"
+            )
+    except Exception as e:
+        logger.error(f"Error toggling pin for conversation {conversation_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail=f"Could not update conversation pin status: {e}"
+        )

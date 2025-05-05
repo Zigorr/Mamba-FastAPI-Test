@@ -15,7 +15,7 @@ from reset_database import reset_database
 # State and Auth
 import auth
 from auth import get_current_user, create_access_token, get_token_header
-from services.user_services import register_user, login_user, rename_conversation, delete_conversation, get_conversation_details, get_user_conversations
+from services.user_services import register_user, login_user, rename_conversation, delete_conversation, get_conversation_details, get_user_conversations, toggle_conversation_pin
 from dto import (
     CreateUserDto, UserDto, LoginDto, 
     ConversationDto, CreateConversationDto,
@@ -592,6 +592,23 @@ async def get_user_conversations_endpoint(
 
     # Call the service function with the user's email and database session
     return await get_user_conversations(current_user.email, db)
+
+@app.post("/conversations/{conversation_id}/toggle-pin", response_model=ConversationDto, tags=["Chat"])
+async def toggle_pin_endpoint(
+    conversation_id: str,
+    token: str = Depends(get_token_header),
+    db: Session = Depends(get_db)
+):
+    """Toggle the pinned status of a conversation."""
+    # Verify token and get current user
+    try:
+        current_user = await get_current_user(token=token, db=db)
+        logger.info(f"User {current_user.email} attempting to toggle pin for conversation {conversation_id}")
+    except HTTPException as e:
+        raise e
+
+    # Call the service function
+    return await toggle_conversation_pin(conversation_id, current_user.email, db)
 
 # Add startup/shutdown events
 @app.on_event("startup")
