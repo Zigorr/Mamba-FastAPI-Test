@@ -1,9 +1,14 @@
 import uvicorn # type: ignore
+import os # Ensure os is imported early
+from dotenv import load_dotenv # type: ignore
+
+# --- Load Environment Variables --- 
+load_dotenv(override=True) # Moved to the top
+# --------------------------------
+
 from fastapi import FastAPI, Depends, HTTPException, status, Query, Request, Response # type: ignore
 from fastapi.responses import HTMLResponse # type: ignore
 from fastapi.middleware.cors import CORSMiddleware # type: ignore
-import os
-from dotenv import load_dotenv # type: ignore
 import logging
 from typing import Dict
 import certifi # type: ignore
@@ -37,7 +42,6 @@ from services.agency_services import AgencyService
 from utils.valkey_utils import publish_message_to_valkey
 import json
 
-load_dotenv(override=True)
 os.environ["SSL_CERT_FILE"] = certifi.where()
 
 # Configure logging
