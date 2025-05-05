@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session # type: ignore
 from passlib.context import CryptContext # type: ignore
 from datetime import datetime
 from reset_database import reset_database
+from reset_pins import reset_all_pins
 
 # State and Auth
 import auth
@@ -589,6 +590,22 @@ async def toggle_pin_endpoint(
 
     # Call the service function
     return await toggle_conversation_pin(conversation_id, current_user.email, db)
+
+@app.post("/admin/reset-all-pins", status_code=status.HTTP_200_OK, tags=["Admin"])
+async def reset_all_pins_endpoint():
+    """Reset all pinned conversations to unpinned (no authentication required)."""
+    try:
+        # Call the reset function
+        reset_all_pins()
+        
+        logger.info("All pins have been reset by API request")
+        return {"message": "All conversations have been unpinned successfully"}
+    except Exception as e:
+        logger.error(f"Error resetting pins: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to reset pins: {str(e)}"
+        )
 
 # Add startup/shutdown events
 @app.on_event("startup")
