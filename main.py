@@ -15,12 +15,12 @@ from reset_database import reset_database
 # State and Auth
 import auth
 from auth import get_current_user, create_access_token, get_token_header
-from services.user_services import register_user, login_user
+from services.user_services import register_user, login_user, rename_conversation, delete_conversation, get_conversation_details, get_user_conversations
 from dto import (
     CreateUserDto, UserDto, LoginDto, 
     ConversationDto, CreateConversationDto,
     MessageDto, SendMessageDto, ConversationStateDto,
-    UpdateConversationStateDto
+    UpdateConversationStateDto, RenameConversationDto
 )
 
 # Database and Models
@@ -338,7 +338,7 @@ async def get_messages_flexible(
     }
 
 @app.get("/conversations", tags=["Chat"])
-async def get_user_conversations(
+async def get_conversations_with_messages(
     limit: int = Query(20, description="Maximum number of conversations to retrieve"),
     offset: int = Query(0, description="Number of conversations to skip"),
     token: str = Depends(get_token_header),
@@ -531,7 +531,7 @@ async def delete_conversation_endpoint(
     db: Session = Depends(get_db)
 ):
     """Deletes an entire conversation and its messages."""
-    # 1. Verify token and get current user
+    # Verify token and get current user
     try:
         current_user = await get_current_user(token=token, db=db)
         logger.info(f"User {current_user.email} attempting to delete conversation {conversation_id}")
@@ -539,44 +539,59 @@ async def delete_conversation_endpoint(
         # Re-raise authentication errors
         raise e 
 
-    conversation_repo = ConversationRepository(db)
-    
-    # 2. Find the conversation
-    # Use the standard get, no lock needed for deletion check
-    conversation = conversation_repo.get_by_id(conversation_id)
+    # Call the service function
+    return await delete_conversation(conversation_id, current_user.email, db)
 
-    if not conversation:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found"
-        )
-
-    # 3. Authorization Check: Ensure the current user owns the conversation
-    if conversation.user_email != current_user.email:
-        logger.warning(f"User {current_user.email} forbidden to delete conversation {conversation_id} owned by {conversation.user_email}")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to delete this conversation"
-        )
-
-    # 4. Perform Deletion
+@app.patch("/conversations/{conversation_id}/rename", response_model=ConversationDto, tags=["Chat"])
+async def rename_conversation_endpoint(
+    conversation_id: str,
+    rename_data: RenameConversationDto,
+    token: str = Depends(get_token_header),
+    db: Session = Depends(get_db)
+):
+    """Rename an existing conversation."""
+    # Verify token and get current user
     try:
-        deleted = conversation_repo.delete_conversation(conversation_id)
-        if deleted:
-            logger.info(f"Conversation {conversation_id} deleted successfully by user {current_user.email}")
-            # Return No Content (204) on success, FastAPI handles this automatically by returning None
-            return None 
-        else:
-            # This case should ideally not be reached if the conversation was found above
-            logger.error(f"Conversation {conversation_id} found but deletion failed.")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete conversation")
-            
-    except Exception as e:
-        # Catch potential DB errors during delete
-        logger.error(f"Error deleting conversation {conversation_id}: {e}", exc_info=True)
-        # Consider rolling back if delete_conversation didn't commit, though it does now.
-        # db.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Could not delete conversation: {e}")
+        current_user = await get_current_user(token=token, db=db)
+        logger.info(f"User {current_user.email} attempting to rename conversation {conversation_id}")
+    except HTTPException as e:
+        raise e
+
+    # Call the service function
+    return await rename_conversation(conversation_id, rename_data.name, current_user.email, db)
+
+@app.get("/conversations/{conversation_id}", tags=["Chat"])
+async def get_conversation_details_endpoint(
+    conversation_id: str,
+    token: str = Depends(get_token_header),
+    db: Session = Depends(get_db)
+):
+    """Get detailed information about a specific conversation."""
+    # Verify token and get current user
+    try:
+        current_user = await get_current_user(token=token, db=db)
+        logger.info(f"User {current_user.email} requesting details for conversation {conversation_id}")
+    except HTTPException as e:
+        raise e
+
+    # Call the service function
+    return await get_conversation_details(conversation_id, current_user.email, db)
+
+@app.get("/user/conversations", tags=["Chat"])
+async def get_user_conversations_endpoint(
+    token: str = Depends(get_token_header),
+    db: Session = Depends(get_db)
+):
+    """Get all conversations belonging to the authenticated user with essential details."""
+    # Verify token and get current user
+    try:
+        current_user = await get_current_user(token=token, db=db)
+        logger.info(f"User {current_user.email} requesting their conversations")
+    except HTTPException as e:
+        raise e
+
+    # Call the service function with the user's email and database session
+    return await get_user_conversations(current_user.email, db)
 
 # Add startup/shutdown events
 @app.on_event("startup")

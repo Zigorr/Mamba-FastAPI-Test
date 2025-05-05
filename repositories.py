@@ -102,11 +102,40 @@ class ConversationRepository(BaseRepository[Conversation]):
         """Get conversation by ID."""
         return self.db.query(Conversation).filter(Conversation.id == conversation_id).first()
     
-    def get_for_user(self, email: str, limit: int = 50, offset: int = 0) -> List[Conversation]:
-        """Get conversations owned by a user with pagination."""
-        return self.db.query(Conversation).filter(
+    def get_for_user(self, email: str, limit: int = 50, offset: int = 0, ascending: bool = False) -> List[Conversation]:
+        """
+        Get conversations owned by a user with pagination.
+        
+        Args:
+            email: The user's email
+            limit: Maximum number of conversations (0 for all)
+            offset: Number of conversations to skip
+            ascending: If True, order by updated_at ascending (oldest first), 
+                      otherwise descending (newest first)
+        
+        Returns:
+            List of conversations
+        """
+        # Base query
+        query = self.db.query(Conversation).filter(
             Conversation.user_email == email
-        ).order_by(Conversation.updated_at.desc()).offset(offset).limit(limit).all()
+        )
+        
+        # Apply ordering
+        if ascending:
+            query = query.order_by(Conversation.updated_at.asc())
+        else:
+            query = query.order_by(Conversation.updated_at.desc())
+        
+        # Apply offset if specified
+        if offset > 0:
+            query = query.offset(offset)
+        
+        # Apply limit if specified (non-zero)
+        if limit > 0:
+            query = query.limit(limit)
+            
+        return query.all()
     
     def create_from_dto(self, dto: CreateConversationDto, creator_email: str) -> Conversation:
         """Create a new conversation from DTO."""

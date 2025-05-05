@@ -173,4 +173,8 @@ class UpdateConversationStateDto(BaseDto):
     """DTO for updating conversation state fields"""
     shared_state: Optional[Dict[str, Any]] = None
     threads: Optional[Dict[str, Any]] = None
-    settings: Optional[List[Dict[str, Any]]] = None 
+    settings: Optional[List[Dict[str, Any]]] = None
+
+class RenameConversationDto(BaseDto):
+    """DTO for renaming a conversation"""
+    name: str 
