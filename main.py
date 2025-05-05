@@ -24,12 +24,18 @@ from dto import (
 )
 
 # Database and Models
-from database import get_db, engine, SessionLocal
+from database import (
+    get_db, engine, SessionLocal, 
+    # Rename imports for clarity
+    create_valkey_pool as startup_create_pool, 
+    close_valkey_pool as shutdown_close_pool, 
+    get_valkey_connection 
+)
 from models import Base, User
 from repositories import ConversationRepository, MessageRepository, UserRepository
-
-# Agency
 from services.agency_services import AgencyService
+from utils.valkey_utils import publish_message_to_valkey
+import json
 
 load_dotenv(override=True)
 os.environ["SSL_CERT_FILE"] = certifi.where()
@@ -228,13 +234,25 @@ async def chat_endpoint(
             agency.shared_state.set("action", None)
         # Save updated state
         conversation_repo.save_shared_state(conversation_id, agency.shared_state.data)
+
+        # --- Publish to Valkey AFTER successful commit ---
+        try:
+            if user_message_dto:
+                await publish_message_to_valkey(conversation_id, message_repo.to_dto(user_message_dto))
+            if ai_message_dto:
+                await publish_message_to_valkey(conversation_id, message_repo.to_dto(ai_message_dto))
+            
+            return response
+        except Exception as pub_e:
+            # Log failure to publish but don't fail the request, DB is source of truth
+            logger.error(f"Failed to publish message(s) to Valkey for conv {conversation_id}: {pub_e}")
+            return response
     except Exception as e:
         logger.error(f"Error processing message for {conversation_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error processing message: {str(e)}"
         )
-    return response
 
 @app.get("/messages/{conversation_id}", tags=["Chat"])
 async def get_messages_flexible(
@@ -447,6 +465,9 @@ async def submit_form(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error processing message: {str(e)}"
         )
+
+    # --- Update any other publishing calls similarly (e.g., in /submit_form) ---
+
 @app.post("/get_keywords/{conversation_id}", tags=["Chat"])
 async def get_keywords(
     conversation_id: str,
@@ -556,6 +577,21 @@ async def delete_conversation_endpoint(
         # Consider rolling back if delete_conversation didn't commit, though it does now.
         # db.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Could not delete conversation: {e}")
+
+# Add startup/shutdown events
+@app.on_event("startup")
+async def startup_event():
+    logger.info("Application startup...")
+    logger.info("Creating Valkey connection pool...") # Update log message
+    await startup_create_pool() # Call renamed function
+    # Add other startup tasks if needed
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("Application shutdown...")
+    logger.info("Closing Valkey connection pool...") # Update log message
+    await shutdown_close_pool() # Call renamed function
+    # Add other shutdown tasks if needed
 
 if __name__ == "__main__":
     print("Starting FastAPI server...")
