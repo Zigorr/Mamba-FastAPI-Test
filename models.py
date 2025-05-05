@@ -33,6 +33,7 @@ class Conversation(Base):
     shared_state = Column(JSON, nullable=True, default={})
     threads = Column(JSON, nullable=True, default={})
     settings = Column(JSON, nullable=True, default=[])  # Stores a list of assistant settings
+    is_pinned = Column(Boolean, default=False)  # New column for pinned status
     # Relationships
     user = relationship("User", back_populates="conversations")
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")

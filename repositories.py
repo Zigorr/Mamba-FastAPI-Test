@@ -100,11 +100,40 @@ class ConversationRepository(BaseRepository[Conversation]):
         """Get conversation by ID."""
         return self.db.query(Conversation).filter(Conversation.id == conversation_id).first()
     
-    def get_for_user(self, email: str, limit: int = 50, offset: int = 0) -> List[Conversation]:
-        """Get conversations owned by a user with pagination."""
-        return self.db.query(Conversation).filter(
+    def get_for_user(self, email: str, limit: int = 50, offset: int = 0, ascending: bool = False) -> List[Conversation]:
+        """
+        Get conversations owned by a user with pagination.
+        
+        Args:
+            email: The user's email
+            limit: Maximum number of conversations (0 for all)
+            offset: Number of conversations to skip
+            ascending: If True, order by updated_at ascending (oldest first), 
+                      otherwise descending (newest first)
+        
+        Returns:
+            List of conversations, with pinned conversations first, then sorted by updated_at
+        """
+        # Base query for user's conversations
+        query = self.db.query(Conversation).filter(
             Conversation.user_email == email
-        ).order_by(Conversation.updated_at.desc()).offset(offset).limit(limit).all()
+        )
+        
+        # Sort by is_pinned (True first) and then by updated_at
+        if ascending:
+            query = query.order_by(Conversation.is_pinned.desc(), Conversation.updated_at.asc())
+        else:
+            query = query.order_by(Conversation.is_pinned.desc(), Conversation.updated_at.desc())
+        
+        # Apply offset if specified
+        if offset > 0:
+            query = query.offset(offset)
+        
+        # Apply limit if specified (non-zero)
+        if limit > 0:
+            query = query.limit(limit)
+            
+        return query.all()
     
     def create_from_dto(self, dto: CreateConversationDto, creator_email: str) -> Conversation:
         """Create a new conversation from DTO."""
@@ -133,7 +162,8 @@ class ConversationRepository(BaseRepository[Conversation]):
             user_email=conversation.user_email,
             shared_state=conversation.shared_state,
             threads=conversation.threads,
-            settings=conversation.settings
+            settings=conversation.settings,
+            is_pinned=conversation.is_pinned
         )
     
     def update_state(self, conversation_id: str, state_data: Dict[str, Any]) -> Optional[Conversation]:
@@ -202,6 +232,26 @@ class ConversationRepository(BaseRepository[Conversation]):
             self.db.commit()
             return True
         return False
+
+    def toggle_pin(self, conversation_id: str) -> Optional[Conversation]:
+        """Toggle the pinned status of a conversation.
+        
+        Args:
+            conversation_id: The ID of the conversation to toggle
+            
+        Returns:
+            Updated conversation or None if not found
+        """
+        conversation = self.get_by_id(conversation_id)
+        if not conversation:
+            return None
+        
+        # Toggle the is_pinned status
+        conversation.is_pinned = not conversation.is_pinned
+        
+        self.db.commit()
+        self.db.refresh(conversation)
+        return conversation
 
 class MessageRepository(BaseRepository[Message]):
     """Repository for Message entity."""

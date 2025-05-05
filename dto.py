@@ -79,6 +79,7 @@ class ConversationDto(BaseDto):
     threads: Optional[Dict[str, Any]] = None
     settings: Optional[List[Dict[str, Any]]] = None
     latest_message: Optional["MessageDto"] = None
+    is_pinned: Optional[bool] = False
     
     model_config = {
         "arbitrary_types_allowed": True,
@@ -173,4 +174,8 @@ class UpdateConversationStateDto(BaseDto):
     """DTO for updating conversation state fields"""
     shared_state: Optional[Dict[str, Any]] = None
     threads: Optional[Dict[str, Any]] = None
-    settings: Optional[List[Dict[str, Any]]] = None 
+    settings: Optional[List[Dict[str, Any]]] = None
+
+class RenameConversationDto(BaseDto):
+    """DTO for renaming a conversation"""
+    name: str 
