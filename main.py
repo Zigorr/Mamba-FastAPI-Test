@@ -55,7 +55,21 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 app = FastAPI(
     title="Mamba FastAPI Chat",
     description="A FastAPI application with WebSocket chat and user authentication",
-    version="1.0.0"
+    version="1.0.0",
+    openapi_tags=[
+        {
+            "name": "Authentication",
+            "description": "Operations related to user authentication"
+        },
+        {
+            "name": "Chat",
+            "description": "Chat operations, conversations and messages"
+        },
+        {
+            "name": "Admin",
+            "description": "Administrative operations"
+        }
+    ]
 )
 
 # Configure CORS
