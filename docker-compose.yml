@@ -24,8 +24,6 @@ services:
     container_name: mamba-nginx
     ports:
       - "80:80"
-    volumes:
-      - ./nginx/mamba.conf:/etc/nginx/conf.d/mamba.conf
     depends_on:
       - app
     networks:
