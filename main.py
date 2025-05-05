@@ -606,7 +606,6 @@ async def reset_all_pins_endpoint():
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to reset pins: {str(e)}"
         )
-
 # Add startup/shutdown events
 @app.on_event("startup")
 async def startup_event():
