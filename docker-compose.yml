@@ -5,14 +5,6 @@ services:
     build:
       context: .
       dockerfile: dockerfile
-      args:
-        - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
-        - SECRET_KEY=${SECRET_KEY}
-        - DATAFORSEO_LOGIN=${DATAFORSEO_LOGIN}
-        - DATAFORSEO_PASSWORD=${DATAFORSEO_PASSWORD}
-        - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@db:5432/app}
-        - OPENAI_API_KEY=${OPENAI_API_KEY}
-        - USE_MOCK_DATA=${USE_MOCK_DATA:-false}
     env_file:
       - .env
     environment:

@@ -1,22 +1,8 @@
 FROM python:3.12.9
 
-# Add build arguments for environment variables with defaults
-ARG FIRECRAWL_API_KEY=""
-ARG SECRET_KEY=""
-ARG DATAFORSEO_LOGIN=""
-ARG DATAFORSEO_PASSWORD=""
-ARG DATABASE_URL=""
-ARG OPENAI_API_KEY=""
+# Non-sensitive environment variables can remain if needed
 ARG USE_MOCK_DATA="false"
-
-# Set environment variables from build arguments
-ENV FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
-ENV SECRET_KEY=${SECRET_KEY}
-ENV DATAFORSEO_LOGIN=${DATAFORSEO_LOGIN}
-ENV DATAFORSEO_PASSWORD=${DATAFORSEO_PASSWORD}
-ENV DATABASE_URL=${DATABASE_URL}
-ENV OPENAI_API_KEY=${OPENAI_API_KEY}
-ENV USE_MOCK_DATA=${USE_MOCK_DATA}
+ENV USE_MOCK_DATA=${USE_MOCK_DATA} # Example: Keeping a non-sensitive one
 
 WORKDIR /app
 
