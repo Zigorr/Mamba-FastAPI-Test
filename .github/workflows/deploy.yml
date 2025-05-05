@@ -18,12 +18,16 @@ jobs:
           ssh-private-key: ${{ secrets.DO_SSH_KEY }}
 
       - name: Deploy to server via SSH
-        run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << 'EOF'
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DO_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          script: |
             cd ${{ secrets.DEPLOY_PATH }}
             git pull origin main
             docker compose down
             docker compose build
             docker compose up -d
-            sudo systemctl reload nginx
-          EOF
+            docker image prune -af
