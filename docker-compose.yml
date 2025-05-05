@@ -1,3 +1,5 @@
+version: "3.9"
+
 services:
   app:
     build:
@@ -11,8 +13,6 @@ services:
         - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@db:5432/app}
         - OPENAI_API_KEY=${OPENAI_API_KEY}
         - USE_MOCK_DATA=${USE_MOCK_DATA:-false}
-    ports:
-      - "8000:8000"
     env_file:
       - .env
     environment:
@@ -23,9 +23,25 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - USE_MOCK_DATA=${USE_MOCK_DATA:-false}
       - DATABASE_URL=${DATABASE_URL}
+    expose:
+      - "8000"
     networks:
       - app-network
     restart: unless-stopped
+
+  nginx:
+    image: nginx:latest
+    container_name: mamba-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx:/etc/nginx/conf.d
+    depends_on:
+      - app
+    networks:
+      - app-network
+    restart: unless-stopped
+
 networks:
   app-network:
     driver: bridge
