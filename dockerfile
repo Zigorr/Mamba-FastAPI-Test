@@ -1,9 +1,5 @@
 FROM python:3.12.9
 
-# Non-sensitive environment variables can remain if needed
-ARG USE_MOCK_DATA="false"
-ENV USE_MOCK_DATA=${USE_MOCK_DATA} # Example: Keeping a non-sensitive one
-
 WORKDIR /app
 
 # Install system dependencies including PostgreSQL client
