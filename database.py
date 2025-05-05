@@ -3,10 +3,6 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
 from dotenv import load_dotenv
-import redis.asyncio as redis
-import logging
-from redis.asyncio.connection import ConnectionPool
-from typing import Optional
 
 load_dotenv()
 
@@ -42,37 +38,4 @@ def get_db():
     try:
         yield db
     finally:
-        db.close()
-
-# --- Redis Configuration ---
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-redis_pool = None
-
-async def create_redis_pool():
-    """Creates a global Redis connection pool on startup."""
-    global redis_pool
-    try:
-        # decode_responses=True means Redis commands return strings, not bytes
-        redis_pool = ConnectionPool.from_url(REDIS_URL, decode_responses=True, max_connections=20)
-        # Test connection
-        r = redis.Redis(connection_pool=redis_pool)
-        await r.ping()
-        logging.info(f"Successfully connected to Redis at {REDIS_URL} and created pool.")
-        await r.close() # Close the test connection
-    except Exception as e:
-        logging.error(f"Failed to connect to Redis or create pool: {e}")
-        redis_pool = None # Ensure pool is None if connection fails
-
-async def get_redis_connection() -> Optional[redis.Redis]:
-    """Provides a Redis connection from the global pool."""
-    if redis_pool is None:
-        logging.warning("Redis pool is not available.")
-        return None
-    return redis.Redis(connection_pool=redis_pool)
-
-async def close_redis_pool():
-    """Closes the Redis connection pool on shutdown."""
-    global redis_pool
-    if redis_pool:
-        await redis_pool.disconnect()
-        logging.info("Redis connection pool closed.") 
+        db.close() 

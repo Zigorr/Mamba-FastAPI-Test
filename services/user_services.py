@@ -1,91 +1,55 @@
 import logging
-import os # Import os
 from datetime import datetime, timedelta
 from typing import Optional, List
 from jose import JWTError, jwt
-from fastapi import Depends, HTTPException, status, Request
+from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
-from pydantic import BaseModel, EmailStr
-import uuid
+from pydantic import BaseModel
 
 from database import get_db
 from models import User
 from dto import UserDto, CreateUserDto, TokenData, LoginDto
 from repositories import UserRepository, ConversationRepository, MessageRepository
-from auth import (
-    create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES as _dummy_auth_expire, # Keep original import path for now
-    SECRET_KEY as _dummy_auth_secret, ALGORITHM as _dummy_auth_algo # Avoid name clashes if defined elsewhere
-)
-from utils.email_utils import send_verification_email
+from auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# --- Security Configuration Loading ---
-# Load from environment variables with defaults for local development (though defaults are less secure)
-SECRET_KEY = os.getenv("SECRET_KEY", "a_very_default_and_insecure_secret_key_for_dev")
-ALGORITHM = os.getenv("ALGORITHM", "HS256")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
-
-if SECRET_KEY == "a_very_default_and_insecure_secret_key_for_dev":
-    logger.warning("Using default SECRET_KEY. Set a strong SECRET_KEY environment variable for production.")
-# --- End Security Configuration --- 
+# Security configuration
+SECRET_KEY = "your-secret-key"  # In production, use a secure random key
+ALGORITHM = "HS256"
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
-async def register_user(user_data: CreateUserDto, db: Session, request: Request) -> dict:
-    """Register a new user and send verification email."""
+def register_user(user_data: CreateUserDto, db: Session) -> UserDto:
+    """Register a new user."""
+    # Initialize repository
     user_repo = UserRepository(db)
-    hashed_password = pwd_context.hash(user_data.password)
-    verification_token = str(uuid.uuid4()) # Generate a unique token
-
-    try:
-        user = user_repo.create_from_dto(user_data, hashed_password, verification_token)
-        db.flush()
-
-        # Send verification email
-        base_url = str(request.base_url) # Get base URL from request
-        try:
-            await send_verification_email(user.email, verification_token, base_url)
-        except ValueError as domain_error: # Catch the specific ValueError from domain check
-            db.rollback()
-            logger.warning(f"Denied registration due to email domain: {user_data.email}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(domain_error) # Use the error message from ValueError
-            )
-        except Exception as email_error:
-             # Important: Rollback user creation if email fails
-            db.rollback()
-            logger.error(f"Failed to send verification email, rolling back user creation for {user_data.email}: {email_error}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to send verification email. Please try again."
-            )
-            
-        db.commit() # Commit only after email is sent successfully
-        
-        return {"message": "User registered successfully. Please check your email to verify your account."}
-        
-    except IntegrityError:
-        db.rollback()
+    
+    # Check if email already exists
+    if user_repo.get_by_email(user_data.email):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered"
         )
-    except Exception as e:
-        db.rollback()
-        logger.error(f"Error during user registration for {user_data.email}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred during registration."
-        )
+    
+    # Create hashed password
+    hashed_password = pwd_context.hash(user_data.password)
+    
+    # Create user using repository
+    user = user_repo.create_from_dto(user_data, hashed_password)
+    
+    # Return user DTO
+    return UserDto(
+        email=user.email,
+        first_name=user.first_name,
+        last_name=user.last_name
+    )
 
 def authenticate_user(email: str, password: str, db: Session) -> Optional[User]:
     """Authenticate a user by email and password."""
@@ -195,13 +159,10 @@ async def login_user(login_data: LoginDto, db: Session) -> dict:
         last_name=user.last_name
     )
     
-    # Create access token using loaded config
+    # Create access token
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user.email}, 
-        secret_key=SECRET_KEY, 
-        algorithm=ALGORITHM, 
-        expires_delta=access_token_expires
+        data={"sub": user.email}, expires_delta=access_token_expires
     )
     
     # Get user's conversations
