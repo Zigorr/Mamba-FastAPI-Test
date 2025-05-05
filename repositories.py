@@ -71,18 +71,35 @@ class UserRepository(BaseRepository[User]):
         """Get user by email."""
         return self.db.query(User).filter(User.email == email).first()
     
-    def create_from_dto(self, user_dto: CreateUserDto, hashed_password: str) -> User:
-        """Create a new user from DTO."""
-        # Create a dictionary from the DTO
-        user_dict = {
-            "email": user_dto.email,
-            "first_name": user_dto.first_name,
-            "last_name": user_dto.last_name,
-            "password": hashed_password
-        }
-        
-        # Use the base create method with the dictionary
-        return self.create(user_dict)
+    def create_from_dto(self, user_data: CreateUserDto, hashed_password: str, verification_token: str) -> User:
+        """Creates a User from CreateUserDto."""
+        db_user = User(
+            email=user_data.email,
+            first_name=user_data.first_name,
+            last_name=user_data.last_name,
+            password=hashed_password,
+            verification_token=verification_token, # Save the token
+            is_verified=False # Default to not verified
+        )
+        self.db.add(db_user)
+        # Removed db.commit() and db.refresh() - handled in service layer
+        return db_user
+    
+    def verify_user(self, token: str) -> bool:
+        """Verifies a user by their verification token."""
+        user = self.db.query(User).filter(User.verification_token == token).first()
+        if user and not user.is_verified:
+            user.is_verified = True
+            user.verification_token = None # Clear token after verification
+            self.db.add(user)
+            self.db.commit()
+            self.db.refresh(user)
+            return True
+        return False
+
+    def get_by_verification_token(self, token: str) -> Optional[User]:
+        """Gets a user by their verification token."""
+        return self.db.query(User).filter(User.verification_token == token).first()
     
     def to_dto(self, user: User) -> UserDto:
         """Convert User model to UserDto."""
@@ -101,6 +118,11 @@ class ConversationRepository(BaseRepository[Conversation]):
     def get_by_id(self, conversation_id: str) -> Optional[Conversation]:
         """Get conversation by ID."""
         return self.db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    
+    def get_by_id_for_update(self, conversation_id: str) -> Optional[Conversation]:
+        """Get conversation by ID with a row-level lock for update."""
+        # This ensures that the row is locked until the current transaction is committed or rolled back.
+        return self.db.query(Conversation).filter(Conversation.id == conversation_id).with_for_update().first()
     
     def get_for_user(self, email: str, limit: int = 50, offset: int = 0) -> List[Conversation]:
         """Get conversations owned by a user with pagination."""
@@ -263,19 +285,29 @@ class MessageRepository(BaseRepository[Message]):
         result = self.db.execute(query)
         return len(result.scalars().all())
     
-    def create_from_dto(self, dto: SendMessageDto, sender_email: str, is_from_agency: bool = False) -> Message:
-        """Create a message from DTO."""
+    def create_from_dto(self, dto: SendMessageDto, sender_email: Optional[str], is_from_agency: bool = False, commit: bool = False) -> Message:
+        """Create a message from DTO. Commit is controlled externally."""
         message = Message(
             content=dto.content,
             conversation_id=dto.conversation_id,
             sender_email=sender_email,
-            is_from_agency=is_from_agency
+            is_from_agency=is_from_agency,
+            timestamp=datetime.datetime.now(datetime.timezone.utc) # Ensure timestamp is set on creation
         )
-        conversation_repo = ConversationRepository(self.db)
-        conversation_repo.update_conversation(dto.conversation_id)
         self.db.add(message)
-        self.db.commit()
-        self.db.refresh(message)
+        self.db.flush() # Assign ID and other defaults
+        self.db.refresh(message) # Load the full object
+        
+        # Update conversation timestamp without committing here
+        self.db.query(Conversation).filter(Conversation.id == dto.conversation_id).update(
+            {Conversation.updated_at: message.timestamp},
+            synchronize_session=False # Important when not committing immediately
+        )
+        
+        # Commit is handled by the calling service/endpoint
+        # if commit:
+        #    self.db.commit()
+        #    self.db.refresh(message)
         return message
     
     def create_system_message(self, conversation_id: str, content: str, is_from_agency: bool = True) -> Message:
@@ -306,3 +338,12 @@ class MessageRepository(BaseRepository[Message]):
         self.db.commit()
         
         return messages
+
+    def delete(self, message_id: int) -> bool:
+        """Deletes a message by its ID."""
+        message = self.get_by_id(message_id)
+        if message:
+            self.db.delete(message)
+            self.db.commit()
+            return True
+        return False

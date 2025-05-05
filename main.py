@@ -1,5 +1,5 @@
 import uvicorn # type: ignore
-from fastapi import FastAPI, Depends, HTTPException, status, Query, Request, Response # type: ignore
+from fastapi import FastAPI, Depends, HTTPException, status, Query, Request, Response, Body # type: ignore
 from fastapi.responses import HTMLResponse # type: ignore
 from fastapi.middleware.cors import CORSMiddleware # type: ignore
 import os
@@ -24,12 +24,17 @@ from dto import (
 )
 
 # Database and Models
-from database import get_db, engine, SessionLocal
+from database import (
+    get_db, engine, SessionLocal, 
+    create_redis_pool, close_redis_pool, get_redis_connection # Updated imports
+)
 from models import Base, User
 from repositories import ConversationRepository, MessageRepository, UserRepository
 
 # Agency
 from services.agency_services import AgencyService
+from utils.redis_utils import publish_message_to_redis # Import publish helper
+import json # Import json
 
 load_dotenv(override=True)
 os.environ["SSL_CERT_FILE"] = certifi.where()
@@ -59,6 +64,21 @@ app.add_middleware(
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
+# Add startup event to check Redis
+@app.on_event("startup")
+async def startup_event():
+    logger.info("Application startup...")
+    logger.info("Creating Redis connection pool...")
+    await create_redis_pool()
+    # Add other startup tasks if needed
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("Application shutdown...")
+    logger.info("Closing Redis connection pool...")
+    await close_redis_pool()
+    # Add other shutdown tasks if needed
+
 # @app.options("/{path:path}")
 # async def preflight(full_path: str, request: Request) -> Response:
 #     return Response(status_code=204)
@@ -68,15 +88,37 @@ Base.metadata.create_all(bind=engine)
 async def read_root():
      return {"message": "Welcome to the Mamba FastAPI"}
 
-@app.post("/register", response_model=UserDto, tags=["Authentication"])
-async def register_user_endpoint(user_data: CreateUserDto, db=Depends(get_db)):
-    """Register a new user."""
-    return register_user(user_data, db)
+@app.post("/register", tags=["Authentication"])
+async def register_user_endpoint(user_data: CreateUserDto, request: Request, db: Session = Depends(get_db)):
+    """Register a new user and trigger verification email."""
+    # Note: Response model removed as we return a message dict now
+    return await register_user(user_data, db, request)
 
 @app.post("/login", tags=["Authentication"])
 async def login_for_access_token(login_data: LoginDto, db=Depends(get_db)):
     """Login a user and return an access token."""
     return await login_user(login_data, db)
+
+@app.get("/verify-email", tags=["Authentication"], response_class=HTMLResponse)
+async def verify_email_endpoint(token: str = Query(...), db: Session = Depends(get_db)):
+    """Verify user's email address using the provided token."""
+    user_repo = UserRepository(db)
+    user = user_repo.get_by_verification_token(token)
+    
+    if not user:
+        return HTMLResponse(content="<h1>Invalid or expired verification token.</h1>", status_code=400)
+    
+    if user.is_verified:
+        return HTMLResponse(content="<h1>Email already verified.</h1>")
+
+    if user_repo.verify_user(token):
+        logger.info(f"Email verified successfully for user {user.email}")
+        # You can redirect to a login page or show a success message
+        return HTMLResponse(content="<h1>Email verified successfully! You can now log in.</h1>")
+    else:
+        # This case should ideally not happen if get_by_verification_token worked
+        logger.error(f"Verification failed unexpectedly for token {token}")
+        return HTMLResponse(content="<h1>Email verification failed. Please try again or contact support.</h1>", status_code=500)
 
 @app.post("/chat", tags=["Chat"])
 async def create_chat(
@@ -115,7 +157,7 @@ async def create_chat(
     # Forward the message to the chat endpoint
     response = await chat_endpoint(
         conversation_id=conversation.id,
-        request=request,
+        payload=request,
         token=token,
         db=db
     )
@@ -126,91 +168,85 @@ async def create_chat(
 @app.post("/chat/{conversation_id}", tags=["Chat"])
 async def chat_endpoint(
     conversation_id: str,
-    request: dict,
+    payload: dict = Body(...),
     token: str = Depends(get_token_header),
     db: Session = Depends(get_db)
 ):
     # Verify token and get current user
     try:
         current_user = await get_current_user(token=token, db=db)
-        logger.info(f"User {current_user.email} authenticated")
     except HTTPException as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Authentication failed: {e.detail}"
-        )
+        raise e
 
-    # Get message from request
-    message = request.get("message")
-    if not message:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Message is required"
-        )
+    message_content = payload.get("message")
+    if not message_content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Message is required")
 
     conversation_repo = ConversationRepository(db)
-    message_repo = MessageRepository(db)  # Create message repository
+    message_repo = MessageRepository(db)
 
-    # Validate that the conversation belongs to the current user
-    conversation = conversation_repo.get_by_id(conversation_id)
-    if not conversation:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found"
-        )
-    
-    if conversation.user_email != current_user.email:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have access to this conversation"
-        )
-
-    logger.info(f"Received message from client {current_user.email} for conversation {conversation_id}: {message}")
-
-    # Save user message to database
-    user_message_dto = SendMessageDto(
-        conversation_id=conversation_id,
-        content=message
-    )
-    message_repo.create_from_dto(user_message_dto, current_user.email, is_from_agency=False)
-
-    # Initialize or load agency
-    agency = AgencyService.initialize_agency(conversation_id, conversation_repo)
+    user_message_db = None
+    ai_message_db = None
+    agency_response_content = None
+    agency_action = None
 
     try:
-        # Get completion from agency
-        agency_response = agency.get_completion(message=message)
-        
-        
-        # Save AI response to database
-        ai_message_dto = SendMessageDto(
-            conversation_id=conversation_id,
-            content=agency_response
-        )
-        message_repo.create_from_dto(ai_message_dto, None, is_from_agency=True)
-        
+        # Lock the conversation row
+        conversation = conversation_repo.get_by_id_for_update(conversation_id)
+        if not conversation:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+        if conversation.user_email != current_user.email:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+        logger.info(f"Processing message from {current_user.email} for conv {conversation_id}: {message_content}")
+
+        # 1. Save user message (no commit yet)
+        user_message_dto = SendMessageDto(conversation_id=conversation_id, content=message_content)
+        user_message_db = message_repo.create_from_dto(user_message_dto, current_user.email, is_from_agency=False)
+
+        # 2. Initialize agency and get completion (reads state from locked conversation)
+        agency = AgencyService.initialize_agency(conversation_id, conversation_repo, conversation_override=conversation)
+        agency_response_content = agency.get_completion(message=message_content)
+
+        # 3. Save AI response (no commit yet)
+        if agency_response_content:
+            ai_message_dto = SendMessageDto(conversation_id=conversation_id, content=agency_response_content)
+            ai_message_db = message_repo.create_from_dto(ai_message_dto, None, is_from_agency=True)
+
+        # 4. Extract action and Save updated state (no commit yet)
         agency_action = agency.shared_state.get("action")
-        if agency_action:
-            response = {
-                "response": agency_response, 
-                "is_from_agency": True, 
-                "action": agency_action
-            }
-        else:
-            response = {
-                "response": agency_response, "is_from_agency": True}
+        conversation.shared_state = agency.shared_state.data 
+        db.add(conversation)
+        
+    except HTTPException as e:
+        db.rollback()
+        raise e
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error processing message for {conversation_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error processing message: {str(e)}")
+
+    # Publish to Redis AFTER successful commit
+    try:
+        if user_message_db:
+            await publish_message_to_redis(conversation_id, message_repo.to_dto(user_message_db))
+        if ai_message_db:
+            await publish_message_to_redis(conversation_id, message_repo.to_dto(ai_message_db))
             
         if agency_action and agency_action.get("action-type") == "keywords_ready":
-            agency.shared_state.set("action", None)
-        # Save updated state
-        conversation_repo.save_shared_state(conversation_id, agency.shared_state.data)
-    except Exception as e:
-        logger.error(f"Error processing message for {conversation_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing message: {str(e)}"
-        )
-    return response
+            pass
+
+    except Exception as pub_e:
+        logger.error(f"Failed to publish message(s) to Redis for conv {conversation_id}: {pub_e}")
+
+    response_payload = {
+        "response": agency_response_content,
+        "is_from_agency": True
+    }
+    if agency_action:
+        response_payload["action"] = agency_action
+        
+    return response_payload
 
 @app.get("/messages/{conversation_id}", tags=["Chat"])
 async def get_messages_flexible(
@@ -274,11 +310,10 @@ async def get_messages_flexible(
     # Convert to DTOs
     message_dtos = [message_repo.to_dto(message) for message in messages]
 
-    agency = AgencyService.initialize_agency(conversation_id, conversation_repo)
+    # Read state directly from DB for response context if needed
+    latest_action = conversation.shared_state.get("action") if conversation and conversation.shared_state else None
 
-    latest_action = agency.shared_state.get("action", None)
-
-    keyword_tables = agency.shared_state.get("keywords_output", None)
+    keyword_tables = conversation.shared_state.get("keywords_output", None)
     generated_content = {}
     
     if keyword_tables:
@@ -367,8 +402,9 @@ async def submit_form(
     conversation_repo = ConversationRepository(db)
     message_repo = MessageRepository(db)  # Create message repository
 
-    # Validate that the conversation belongs to the current user
-    conversation = conversation_repo.get_by_id(conversation_id)
+    # Lock the conversation row for the duration of this transaction
+    conversation = conversation_repo.get_by_id_for_update(conversation_id)
+    
     if not conversation:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -423,6 +459,7 @@ async def submit_form(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error processing message: {str(e)}"
         )
+
 @app.post("/get_keywords/{conversation_id}", tags=["Chat"])
 async def get_keywords(
     conversation_id: str,
@@ -478,6 +515,52 @@ async def get_keywords(
     conversation_repo.save_shared_state(conversation_id, agency.shared_state.data)
 
     return table_data
+
+@app.delete("/messages/{message_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Chat"])
+async def delete_message_endpoint(
+    message_id: int,
+    token: str = Depends(get_token_header),
+    db: Session = Depends(get_db)
+):
+    """Deletes a specific message."""
+    # Verify token and get current user
+    try:
+        current_user = await get_current_user(token=token, db=db)
+        logger.info(f"User {current_user.email} attempting to delete message {message_id}")
+    except HTTPException as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Authentication failed: {e.detail}"
+        )
+
+    message_repo = MessageRepository(db)
+    message = message_repo.get_by_id(message_id)
+
+    if not message:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Message not found"
+        )
+
+    # Permission Check: Only allow sender to delete their own message
+    # Add admin check here if needed (e.g., if current_user.is_admin:)
+    if message.sender_email != current_user.email:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to delete this message"
+        )
+
+    if message_repo.delete(message_id):
+        logger.info(f"Message {message_id} deleted successfully by user {current_user.email}")
+        # Return No Content on success
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    else:
+        # This case indicates the message was found but deletion failed somehow
+        logger.error(f"Failed to delete message {message_id} even though it was found.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete message"
+        )
 
 if __name__ == "__main__":
     print("Starting FastAPI server...")

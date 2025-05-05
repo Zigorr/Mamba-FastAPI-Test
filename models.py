@@ -7,10 +7,12 @@ import datetime
 class User(Base):
     __tablename__ = "users"
 
-    email = Column(String, primary_key=True, index=True)
+    email = Column(String, primary_key=True, index=True, unique=True)
     first_name = Column(String)
     last_name = Column(String)
     password = Column(String)
+    is_verified = Column(Boolean, default=False)
+    verification_token = Column(String, nullable=True, unique=True, index=True)
     # Relationships
     conversations = relationship("Conversation", back_populates="user", cascade="all, delete-orphan")
     messages = relationship("Message", back_populates="sender")
