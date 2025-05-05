@@ -71,18 +71,16 @@ class UserRepository(BaseRepository[User]):
         """Get user by email."""
         return self.db.query(User).filter(User.email == email).first()
     
-    def create_from_dto(self, user_dto: CreateUserDto, hashed_password: str) -> User:
-        """Create a new user from DTO."""
-        # Create a dictionary from the DTO
-        user_dict = {
-            "email": user_dto.email,
-            "first_name": user_dto.first_name,
-            "last_name": user_dto.last_name,
-            "password": hashed_password
-        }
-        
-        # Use the base create method with the dictionary
-        return self.create(user_dict)
+    def create_from_dto(self, user_data: CreateUserDto, hashed_password: str) -> User:
+        """Creates a User from CreateUserDto."""
+        db_user = User(
+            email=user_data.email,
+            first_name=user_data.first_name,
+            last_name=user_data.last_name,
+            password=hashed_password,
+        )
+        self.db.add(db_user)
+        return db_user
     
     def to_dto(self, user: User) -> UserDto:
         """Convert User model to UserDto."""

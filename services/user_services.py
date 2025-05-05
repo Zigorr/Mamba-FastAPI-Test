@@ -11,45 +11,47 @@ from pydantic import BaseModel
 from database import get_db
 from models import User
 from dto import UserDto, CreateUserDto, TokenData, LoginDto
-from repositories import UserRepository, ConversationRepository, MessageRepository
-from auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
+from repositories import UserRepository
+from auth import create_access_token, SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Security configuration
-SECRET_KEY = "your-secret-key"  # In production, use a secure random key
-ALGORITHM = "HS256"
-
-# Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
 def register_user(user_data: CreateUserDto, db: Session) -> UserDto:
     """Register a new user."""
-    # Initialize repository
     user_repo = UserRepository(db)
+    hashed_password = pwd_context.hash(user_data.password)
     
-    # Check if email already exists
-    if user_repo.get_by_email(user_data.email):
+    try:
+        user = user_repo.create_from_dto(user_data, hashed_password)
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+        return UserDto(
+            email=user.email,
+            first_name=user.first_name,
+            last_name=user.last_name
+        )
+        
+    except IntegrityError:
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered"
         )
-    
-    # Create hashed password
-    hashed_password = pwd_context.hash(user_data.password)
-    
-    # Create user using repository
-    user = user_repo.create_from_dto(user_data, hashed_password)
-    
-    # Return user DTO
-    return UserDto(
-        email=user.email,
-        first_name=user.first_name,
-        last_name=user.last_name
-    )
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error during user registration for {user_data.email}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred during registration."
+        )
 
 def authenticate_user(email: str, password: str, db: Session) -> Optional[User]:
     """Authenticate a user by email and password."""

@@ -7,7 +7,7 @@ import datetime
 class User(Base):
     __tablename__ = "users"
 
-    email = Column(String, primary_key=True, index=True)
+    email = Column(String, primary_key=True, index=True, unique=True)
     first_name = Column(String)
     last_name = Column(String)
     password = Column(String)

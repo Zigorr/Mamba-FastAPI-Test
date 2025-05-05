@@ -11,6 +11,5 @@ python-multipart>=0.0.6
 psycopg2>=2.9.1
 pydantic[email]>=2.5.0
 firecrawl
-email-validator>=2.1.0
 certifi>=2024.2.2
 redis>=4.2.0

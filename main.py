@@ -79,7 +79,7 @@ async def read_root():
      return {"message": "Welcome to the Mamba FastAPI"}
 
 @app.post("/register", response_model=UserDto, tags=["Authentication"])
-async def register_user_endpoint(user_data: CreateUserDto, db=Depends(get_db)):
+async def register_user_endpoint(user_data: CreateUserDto, db: Session = Depends(get_db)):
     """Register a new user."""
     return register_user(user_data, db)
 
@@ -87,30 +87,6 @@ async def register_user_endpoint(user_data: CreateUserDto, db=Depends(get_db)):
 async def login_for_access_token(login_data: LoginDto, db=Depends(get_db)):
     """Login a user and return an access token."""
     return await login_user(login_data, db)
-
-@app.get("/verify-email", tags=["Authentication"], response_class=HTMLResponse)
-async def verify_email_endpoint(token: str = Query(...), db: Session = Depends(get_db)):
-    """Verify user's email address using the provided token."""
-    user_repo = UserRepository(db)
-    # Use the correct method name from UserRepository
-    user = user_repo.get_by_verification_token(token)
-
-    if not user:
-        return HTMLResponse(content="<h1>Invalid or expired verification token.</h1>", status_code=400)
-
-    if user.is_verified:
-        # Optionally redirect to login or dashboard
-        return HTMLResponse(content="<h1>Email already verified. You can now log in.</h1>")
-
-    # Use the correct method name from UserRepository
-    if user_repo.verify_user(token):
-        logger.info(f"Email verified successfully for user {user.email}")
-        # Optionally redirect to a login page or show a success message
-        return HTMLResponse(content="<h1>Email verified successfully! You can now log in.</h1>")
-    else:
-        # This case should ideally not happen if get_by_verification_token worked
-        logger.error(f"Verification failed unexpectedly for token {token}")
-        return HTMLResponse(content="<h1>Email verification failed. Please try again or contact support.</h1>", status_code=500)
 
 @app.post("/chat", tags=["Chat"])
 async def create_chat(
