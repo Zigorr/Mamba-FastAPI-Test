@@ -91,7 +91,7 @@ Base.metadata.create_all(bind=engine)
 
 @app.get("/")
 async def read_root():
-     return {"message": "Welcome to Mamba FastAPI Server"}
+     return {"message": "Welcome to The Jungle"}
 
 @app.post("/register", response_model=UserDto, tags=["Authentication"])
 async def register_user_endpoint(user_data: CreateUserDto, db: Session = Depends(get_db)):
