@@ -10,7 +10,7 @@ from alembic import context
 # --- Our Imports ---
 from dotenv import load_dotenv
 from database import Base # Assuming your Base is in database.py
-import models # <--- ADD THIS LINE to ensure models are registered with Base
+import models # Ensure models are registered with Base
 # --- End Our Imports ---
 
 # this is the Alembic Config object, which provides
@@ -33,6 +33,16 @@ target_metadata = Base.metadata
 # my_important_option = config.get_main_option("my_important_option")
 # ... etc.
 
+# Function to get database URL from .env file
+def get_url_from_env():
+    load_dotenv()
+    url = os.getenv("DATABASE_URL")
+    if not url:
+        # If you want to allow a fallback to alembic.ini for some reason, you can get it here:
+        # url = config.get_main_option("sqlalchemy.url")
+        # However, it's safer to require it from .env for sensitive URLs.
+        raise ValueError("DATABASE_URL not found in .env file. Please set it there.")
+    return url
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
@@ -46,13 +56,7 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    # --- MODIFIED: Load URL from .env or alembic.ini ---
-    load_dotenv()
-    url = os.getenv("DATABASE_URL")
-    if not url:
-        url = config.get_main_option("sqlalchemy.url")
-    # --- End MODIFICATION ---
-        
+    url = get_url_from_env()
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -71,21 +75,8 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
-    # --- MODIFIED: Load URL from .env or alembic.ini ---
-    load_dotenv()
-    db_url = os.getenv("DATABASE_URL")
-
-    if db_url:
-        # If DATABASE_URL is set in .env, use it directly
-        connectable = create_engine(db_url)
-    else:
-        # Otherwise, fall back to engine configuration from alembic.ini
-        connectable = engine_from_config(
-            config.get_section(config.config_ini_section, {}),
-            prefix="sqlalchemy.",
-            poolclass=pool.NullPool,
-        )
-    # --- End MODIFICATION ---
+    db_url = get_url_from_env()
+    connectable = create_engine(db_url)
 
     with connectable.connect() as connection:
         context.configure(
