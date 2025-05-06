@@ -7,5 +7,4 @@ __pycache__/
 
 .env
 .cursorrules
-alembic.ini
 settings.json
