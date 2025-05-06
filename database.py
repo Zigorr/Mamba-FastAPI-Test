@@ -45,7 +45,7 @@ def get_db():
     try:
         yield db
     finally:
-        db.close()
+        db.close() 
 
 # --- Valkey (Redis Compatible) Configuration ---
 # NOTE: Using Valkey (DigitalOcean Managed Redis Fork)
