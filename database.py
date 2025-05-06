@@ -22,6 +22,7 @@ POSTGRES_DB = os.getenv("POSTGRES_DB", "mamba_db")
 
 # Construct PostgreSQL URL
 DATABASE_URL = os.getenv("DATABASE_URL")
+logger.info(f"DATABASE_URL from env: {DATABASE_URL}")
 
 # Create SQLAlchemy engine with PostgreSQL-specific settings
 engine = create_engine(

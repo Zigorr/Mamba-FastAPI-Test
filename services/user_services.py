@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from database import get_db
 from models import User
 from dto import UserDto, CreateUserDto, TokenData, LoginDto
-from repositories import UserRepository
+from repositories import UserRepository, ConversationRepository, MessageRepository
 from auth import create_access_token, SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 
 # Configure logging
