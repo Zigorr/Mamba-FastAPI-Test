@@ -1,9 +1,11 @@
 import uvicorn # type: ignore
 import os # Ensure os is imported early
-from dotenv import load_dotenv # type: ignore
+# from dotenv import load_dotenv # type: ignore # No longer needed here
+from core.config import settings # Import settings early to load .env
+from contextlib import asynccontextmanager # Import for lifespan manager
 
 # --- Load Environment Variables --- 
-load_dotenv(override=True) # Moved to the top
+# load_dotenv(override=True) # Moved to the top and handled by core.config
 # --------------------------------
 
 from fastapi import FastAPI, Depends, HTTPException, status, Query, Request, Response # type: ignore
@@ -11,7 +13,7 @@ from fastapi.responses import HTMLResponse # type: ignore
 from fastapi.middleware.cors import CORSMiddleware # type: ignore
 import logging
 from typing import Dict
-import certifi # type: ignore
+import certifi # Ensure certifi is imported before use
 from sqlalchemy.orm import Session # type: ignore
 from passlib.context import CryptContext # type: ignore
 from datetime import datetime
@@ -43,14 +45,38 @@ from services.agency_services import AgencyService
 # from utils.valkey_utils import publish_message_to_valkey
 import json
 
-os.environ["SSL_CERT_FILE"] = certifi.where()
+# os.environ["SSL_CERT_FILE"] = certifi.where() # Set via settings if needed or ensure certifi is available
+if settings.SSL_CERT_FILE:
+    os.environ["SSL_CERT_FILE"] = settings.SSL_CERT_FILE
+elif certifi.where(): # Default to certifi.where() if not in settings
+    os.environ["SSL_CERT_FILE"] = certifi.where()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Cache TTLs
+MESSAGES_CACHE_TTL_SECONDS = 60  # 1 minute
+# CONVERSATION_DETAILS_CACHE_TTL_SECONDS = 300 # Defined in user_services.py
+# USER_CONVERSATIONS_CACHE_TTL_SECONDS = 120 # Defined in user_services.py
+
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Lifespan manager for startup and shutdown events
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup logic
+    logger.info("Application startup (lifespan)... Genta was here")
+    logger.info("Creating Valkey/Redis connection pool (lifespan)... Genta was here")
+    await create_valkey_pool()
+    # Add other startup tasks if needed
+    yield
+    # Shutdown logic
+    logger.info("Application shutdown (lifespan)... Genta was here")
+    logger.info("Closing Valkey/Redis connection pool (lifespan)... Genta was here")
+    await close_valkey_pool()
+    # Add other shutdown tasks if needed
 
 app = FastAPI(
     title="Mamba FastAPI Chat",
@@ -69,7 +95,8 @@ app = FastAPI(
             "name": "Admin",
             "description": "Administrative operations"
         }
-    ]
+    ],
+    lifespan=lifespan # Add the lifespan manager here
 )
 
 # Configure CORS
@@ -261,20 +288,35 @@ async def get_messages_flexible(
 ):
     """
     Get messages for a conversation with flexible options for ordering and pagination.
-    - Use order='asc' to get messages in chronological order (oldest first)
-    - Use order='desc' to get messages in reverse chronological order (newest first)
-    - Set limit=0 to get all messages (no limit)
-    - Use offset to skip messages for pagination
+    Implements cache-aside (lazy loading) pattern with Redis.
     """
     # Verify token and get current user
     try:
         current_user = await get_current_user(token=token, db=db)
-        logger.info(f"User {current_user.email} accessing messages for conversation {conversation_id}")
+        # logger.info(f"User {current_user.email} accessing messages for conversation {conversation_id}") # Moved logging after cache check
     except HTTPException as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Authentication failed: {e.detail}"
         )
+
+    redis_conn = await get_valkey_connection()
+    # Create a cache key that includes all query parameters that affect the result
+    cache_key = f"messages:{conversation_id}:limit_{limit}:offset_{offset}:order_{order.lower()}"
+
+    if redis_conn:
+        try:
+            cached_data_json = await redis_conn.get(cache_key)
+            if cached_data_json:
+                logger.info(f"Cache HIT for messages: {cache_key} by user {current_user.email}")
+                return json.loads(cached_data_json)
+            else:
+                logger.info(f"Cache MISS for messages: {cache_key} by user {current_user.email}")
+        except Exception as e:
+            logger.error(f"Redis GET error for messages {cache_key}: {e}", exc_info=True)
+            # Proceed to fetch from DB if Redis fails
+
+    logger.info(f"User {current_user.email} accessing messages for conversation {conversation_id} from DB (after cache miss/error)")
 
     # Validate conversation exists and belongs to user
     conversation_repo = ConversationRepository(db)
@@ -605,75 +647,6 @@ async def toggle_pin_endpoint(
 
     # Call the service function
     return await toggle_conversation_pin(conversation_id, current_user.email, db)
-
-@app.post("/admin/reset-database", tags=["Admin"], status_code=status.HTTP_200_OK)
-async def reset_database_endpoint(token: str = Depends(get_token_header), db: Session = Depends(get_db)):
-    """
-    Drops all tables in the database. Ensure this is protected and used only in development/admin scenarios.
-    Requires admin privileges (example: check current_user if admin).
-    For simplicity, this example only checks for a valid token. Add role-based access control for production.
-    WARNING: This will delete all data in the database!
-    """
-    try:
-        current_user = await get_current_user(token=token, db=db) # Verify token
-        logger.info(f"User {current_user.email} initiated database reset.")
-    except HTTPException as e:
-        logger.error(f"Unauthorized attempt to reset database: {e.detail}")
-        raise e # Re-raise authentication error
-
-    try:
-        reset_database() # Does not take a session
-        # The original reset_database.py comments out table recreation.
-        # If you want to recreate tables, uncomment that part in reset_database.py
-        # and call Base.metadata.create_all(bind=engine) here or in the script.
-        # For now, assuming it only drops.
-        Base.metadata.create_all(bind=engine) # Recreate tables after dropping, as per common reset logic
-        logger.info("Tables dropped and recreated by admin action.")
-        return {"message": "Database tables dropped and recreated successfully."}
-    except Exception as e:
-        logger.error(f"Error during database reset: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An error occurred during database reset: {str(e)}"
-        )
-
-@app.post("/admin/reset-all-pins", tags=["Admin"], status_code=status.HTTP_200_OK)
-async def reset_all_pins_endpoint(token: str = Depends(get_token_header), db: Session = Depends(get_db)):
-    """
-    Resets all conversation pins to False.
-    Requires admin privileges.
-    """
-    try:
-        current_user = await get_current_user(token=token, db=db)
-        logger.info(f"User {current_user.email} initiated reset of all conversation pins.")
-    except HTTPException as e:
-        logger.error(f"Unauthorized attempt to reset all pins: {e.detail}")
-        raise e
-
-    try:
-        reset_all_pins() # Does not take a session and does not return a count
-        return {"message": "Successfully reset all conversation pins to False."}
-    except Exception as e:
-        logger.error(f"Error during resetting all pins: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An error occurred while resetting pins: {str(e)}"
-        )
-
-# Add startup/shutdown events
-@app.on_event("startup")
-async def startup_event():
-    logger.info("Application startup...")
-    logger.info("Creating Valkey/Redis connection pool...")
-    await create_valkey_pool()
-    # Add other startup tasks if needed
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    logger.info("Application shutdown...")
-    logger.info("Closing Valkey/Redis connection pool...")
-    await close_valkey_pool()
-    # Add other shutdown tasks if needed
 
 if __name__ == "__main__":
     print("Starting FastAPI server...")

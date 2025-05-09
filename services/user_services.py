@@ -14,7 +14,8 @@ from database import get_db, get_valkey_connection
 from models import User
 from dto import UserDto, CreateUserDto, TokenData, LoginDto, ConversationDto
 from repositories import UserRepository, ConversationRepository, MessageRepository
-from auth import create_access_token, SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
+from auth import create_access_token
+from core.config import settings
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -22,6 +23,8 @@ logger = logging.getLogger(__name__)
 
 # Cache TTL for conversation details (e.g., 5 minutes)
 CONVERSATION_CACHE_TTL_SECONDS = 300
+# Cache TTL for user's list of conversations (e.g., 2 minutes)
+USER_CONVERSATIONS_CACHE_TTL_SECONDS = 120
 
 # Security configuration
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -167,7 +170,7 @@ async def login_user(login_data: LoginDto, db: Session) -> dict:
     )
     
     # Create access token
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": user.email}, expires_delta=access_token_expires
     )
@@ -380,16 +383,25 @@ async def get_conversation_details(conversation_id: str, current_user_email: str
 async def get_user_conversations(current_user_email: str, db: Session = None):
     """
     Get all conversations belonging to a user with essential details.
-    
-    Args:
-        current_user_email: Email of the authenticated user
-        db: Database session
-        
-    Returns:
-        List of conversations with essential details (id, name, updated_at, is_pinned)
-        sorted by updated_at (newest first)
+    Implements cache-aside (lazy loading) pattern with Redis.
     """
     logger = logging.getLogger(__name__)
+    redis_conn = await get_valkey_connection()
+    cache_key = f"user_conversations_summary:{current_user_email}"
+
+    if redis_conn:
+        try:
+            cached_data_json = await redis_conn.get(cache_key)
+            if cached_data_json:
+                logger.info(f"Cache HIT for user conversations summary: {cache_key}")
+                return json.loads(cached_data_json) # Deserialize from JSON string
+            else:
+                logger.info(f"Cache MISS for user conversations summary: {cache_key}")
+        except Exception as e:
+            logger.error(f"Redis GET error for {cache_key}: {e}", exc_info=True)
+            # Proceed to fetch from DB if Redis fails
+
+    # Cache miss or Redis error, fetch from DB
     conversation_repo = ConversationRepository(db)
     
     # Get all conversations for user (no limit), ordered by updated_at descending (newest first)
@@ -409,12 +421,23 @@ async def get_user_conversations(current_user_email: str, db: Session = None):
             "is_pinned": conversation.is_pinned
         })
     
-    logger.info(f"Retrieved {len(conversation_list)} conversations for user {current_user_email}")
+    logger.info(f"Retrieved {len(conversation_list)} conversations for user {current_user_email} from DB")
     
-    return {
+    result_data = {
         "conversations": conversation_list,
         "total": len(conversation_list)
     }
+
+    if redis_conn:
+        try:
+            result_data_json = json.dumps(result_data) # Serialize to JSON string
+            await redis_conn.set(cache_key, result_data_json, ex=USER_CONVERSATIONS_CACHE_TTL_SECONDS)
+            logger.info(f"Stored user conversations summary in cache: {cache_key} with TTL {USER_CONVERSATIONS_CACHE_TTL_SECONDS}s")
+        except Exception as e:
+            logger.error(f"Redis SET error for {cache_key}: {e}", exc_info=True)
+            # Log error but proceed, data is already fetched from DB
+
+    return result_data
 
 async def toggle_conversation_pin(conversation_id: str, current_user_email: str, db: Session):
     """
