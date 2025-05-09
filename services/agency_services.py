@@ -32,6 +32,10 @@ class ThreadSafeTTLCache:
     def __repr__(self):
         with self.lock:
             return repr(self.cache)
+        
+    def __len__(self):
+        with self.lock:
+            return len(self.cache)
 
 class AgencyService:
     # Use an LRU cache for agency instances
