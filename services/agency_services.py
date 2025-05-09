@@ -3,7 +3,7 @@ from .MambaSEOAgency.SEOEngineer import SEOEngineer
 import logging
 from fastapi import HTTPException, status
 from cachetools import TTLCache # Changed from LRUCache to TTLCache
-
+from threading import Lock
 logger = logging.getLogger(__name__)
 
 # Define a maximum number of agency instances to keep in memory.
@@ -12,9 +12,30 @@ logger = logging.getLogger(__name__)
 MAX_AGENCY_CACHE_SIZE = 25 # Example: Allows 25 active agencies in memory; adjust as needed
 AGENCY_TTL_SECONDS = 60 # Cache agency instances for 60 seconds of inactivity
 
+class ThreadSafeTTLCache:
+    def __init__(self, maxsize: int, ttl: int):
+        self.cache = TTLCache(maxsize, ttl)
+        self.lock = Lock()
+
+    def __getitem__(self, key):
+        with self.lock:
+            return self.cache[key]
+
+    def __setitem__(self, key, value):
+        with self.lock:
+            self.cache[key] = value
+
+    def __contains__(self, key):
+        with self.lock:
+            return key in self.cache
+
+    def __repr__(self):
+        with self.lock:
+            return repr(self.cache)
+
 class AgencyService:
     # Use an LRU cache for agency instances
-    agency_cache: TTLCache = TTLCache(maxsize=MAX_AGENCY_CACHE_SIZE, ttl=AGENCY_TTL_SECONDS)
+    agency_cache: ThreadSafeTTLCache = ThreadSafeTTLCache(maxsize=MAX_AGENCY_CACHE_SIZE, ttl=AGENCY_TTL_SECONDS)
 
     @classmethod
     def initialize_agency(cls, conversation_id: str, conversation_repo):
