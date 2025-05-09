@@ -186,7 +186,8 @@ class ConversationRepository(BaseRepository[Conversation]):
     
     def load_threads(self, conversation_id: str) -> Optional[dict]:
         """Load only the 'threads' field of a conversation."""
-        result = self.db.query(Conversation.threads).filter(Conversation.id == conversation_id).scalar_one_or_none()
+        stmt = select(Conversation.threads).filter(Conversation.id == conversation_id)
+        result = self.db.execute(stmt).scalar_one_or_none()
         return result
 
     def save_threads(self, conversation_id: str, threads: dict):
@@ -196,7 +197,8 @@ class ConversationRepository(BaseRepository[Conversation]):
 
     def load_settings(self, conversation_id: str) -> Optional[list]: # Assuming settings is a list
         """Load only the 'settings' field of a conversation."""
-        result = self.db.query(Conversation.settings).filter(Conversation.id == conversation_id).scalar_one_or_none()
+        stmt = select(Conversation.settings).filter(Conversation.id == conversation_id)
+        result = self.db.execute(stmt).scalar_one_or_none()
         return result
 
     def save_settings(self, conversation_id: str, settings: list):
@@ -206,7 +208,8 @@ class ConversationRepository(BaseRepository[Conversation]):
 
     def load_shared_state(self, conversation_id: str) -> Optional[dict]:
         """Load only the 'shared_state' field of a conversation."""
-        result = self.db.query(Conversation.shared_state).filter(Conversation.id == conversation_id).scalar_one_or_none()
+        stmt = select(Conversation.shared_state).filter(Conversation.id == conversation_id)
+        result = self.db.execute(stmt).scalar_one_or_none()
         return result
 
     def save_shared_state(self, conversation_id: str, shared_state: dict):

@@ -39,7 +39,7 @@ class AgencyService:
             ceo = SEOEngineer()
 
             agency = Agency(
-                agency_members=[ceo], # Assuming 'agency_members' is the correct param name
+                [ceo], # Assuming 'agency_members' is the correct param name
                                       # If it's just `[ceo]`, change it back.
                 shared_instructions='./MambaSEOAgency/agency_manifesto.md', # Verify this path carefully!
                 threads_callbacks={
