@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 from jose import JWTError, jwt
 from fastapi import Depends, HTTPException, status
@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel
 import json
+import random
+import string
 
 from database import get_db, get_valkey_connection
 from models import User
@@ -30,16 +32,49 @@ USER_CONVERSATIONS_CACHE_TTL_SECONDS = 120
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
+def generate_verification_code(length: int = 5) -> str:
+    """Generates a random alphanumeric verification code."""
+    return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
+
 def register_user(user_data: CreateUserDto, db: Session) -> UserDto:
     """Register a new user."""
     user_repo = UserRepository(db)
     hashed_password = pwd_context.hash(user_data.password)
     
+    # TODO: Implement ZeroBounce email validation here
+    # Example:
+    # if not zerobounce_client.validate(user_data.email):
+    #     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid email address")
+
+    token_limit = None
+    if not user_data.email.endswith("@mamba.agency"):
+        token_limit = 800
+
+    verification_code = generate_verification_code()
+    is_mamba_user = user_data.email.endswith("@mamba.agency")
+
     try:
-        user = user_repo.create_from_dto(user_data, hashed_password)
+        # Create an instance of the User model directly
+        user = User(
+            email=user_data.email,
+            first_name=user_data.first_name,
+            last_name=user_data.last_name,
+            password=hashed_password,
+            role="user", # Default role
+            token_limit=None if is_mamba_user else settings.DEFAULT_FREE_USER_TOKEN_LIMIT,
+            is_subscribed=False, # Default to not subscribed
+            email_verified=False, # Default to not verified
+            email_verification_code=verification_code,
+            tokens_last_reset_at=datetime.now(timezone.utc) if not is_mamba_user else None
+        )
+        
         db.add(user)
         db.commit()
         db.refresh(user)
+
+        # TODO: Implement email sending for verification code here
+        # Example:
+        # email_service.send_verification_email(user.email, verification_code)
 
         return UserDto(
             email=user.email,
@@ -140,66 +175,98 @@ def delete_user(email: str, db: Session) -> bool:
     # Delete user
     return user_repo.delete(email)
 
-async def login_user(login_data: LoginDto, db: Session) -> dict:
-    """Authenticate user and return JWT token."""
-    # Initialize repository
-    user_repo = UserRepository(db)
-    
-    # Get user
-    user = user_repo.get_by_email(login_data.email)
-    
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    # Verify password
-    if not pwd_context.verify(login_data.password, user.password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    userDto = UserDto(
-        email=user.email,
-        first_name=user.first_name,
-        last_name=user.last_name
-    )
-    
-    # Create access token
+async def _generate_auth_response(user: User, db: Session) -> dict:
+    """Helper function to generate the authentication response for a user."""
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": user.email}, expires_delta=access_token_expires
     )
-    
-    # Get user's conversations
+
     conversation_repo = ConversationRepository(db)
-    message_repo = MessageRepository(db)
-    
-    conversations = conversation_repo.get_for_user(user.email, limit=50)
+    conversations = conversation_repo.get_for_user(user.email, limit=50) # TODO: Consider pagination or more specific query
     conversation_summaries = []
-    
-    for conversation in conversations:
-        # Include ID, name and updated_at for sorting
+    for conv in conversations:
         conversation_summaries.append({
-            "id": conversation.id,
-            "name": conversation.name,
-            "updated_at": conversation.updated_at
+            "id": conv.id,
+            "name": conv.name,
+            "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
+            "is_pinned": conv.is_pinned
         })
-        # Sort conversations by updated_at after loop
-        conversation_summaries = sorted(conversation_summaries, 
-            key=lambda x: x["updated_at"], 
-            reverse=True)
-    
+    conversation_summaries = sorted(
+        conversation_summaries, 
+        key=lambda x: (x["is_pinned"], datetime.fromisoformat(x["updated_at"]) if x["updated_at"] else datetime.min),
+        reverse=True
+    )
+
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "user": userDto,
+        "user": {
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "role": user.role,
+            "token_limit": user.token_limit,
+            "is_subscribed": user.is_subscribed,
+            "email_verified": user.email_verified
+        },
         "conversations": conversation_summaries
     }
+
+async def login_user(login_data: LoginDto, db: Session) -> dict:
+    """Authenticate user and return JWT token."""
+    user_repo = UserRepository(db)
+    user = user_repo.get_by_email(login_data.email)
+
+    if not user or not pwd_context.verify(login_data.password, user.password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return await _generate_auth_response(user, db)
+
+async def get_or_create_google_user(email: str, first_name: str, last_name: str, db: Session) -> dict:
+    """Get an existing user or create a new one for Google Sign-In, then return auth response."""
+    user_repo = UserRepository(db)
+    user = user_repo.get_by_email(email)
+
+    if not user:
+        # Create new user for Google Sign-In
+        token_limit = None
+        is_mamba_user_via_google = email.endswith("@mamba.agency")
+        if not is_mamba_user_via_google:
+            token_limit = settings.DEFAULT_FREE_USER_TOKEN_LIMIT
+        
+        new_user_data = User(
+            email=email,
+            first_name=first_name,
+            last_name=last_name,
+            password=pwd_context.hash(settings.GOOGLE_USER_DEFAULT_PASSWORD), 
+            role="user",
+            token_limit=token_limit,
+            is_subscribed=False,
+            email_verified=True, 
+            email_verification_code=None,
+            tokens_last_reset_at=datetime.now(timezone.utc) if not is_mamba_user_via_google else None
+        )
+        try:
+            db.add(new_user_data)
+            db.commit()
+            db.refresh(new_user_data)
+            user = new_user_data
+        except IntegrityError: 
+            db.rollback()
+            logger.error(f"Integrity error creating Google user {email}, user might have been created concurrently.")
+            user = user_repo.get_by_email(email)
+            if not user:
+                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not create or find user after Google sign-in.")
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error creating Google user {email}: {e}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error creating user account after Google sign-in.")
+
+    return await _generate_auth_response(user, db)
 
 async def rename_conversation(conversation_id: str, new_name: str, current_user_email: str, db: Session):
     """
