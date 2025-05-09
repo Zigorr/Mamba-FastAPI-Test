@@ -4,7 +4,10 @@ uvicorn[standard]>=0.24.0
 sqlalchemy>=2.0.23
 python-dotenv>=1.0.0
 python-jose[cryptography]>=3.3.0
-passlib[bcrypt]>=1.7.4
+# passlib[bcrypt]>=1.7.4 # Commented out old line
+passlib==1.7.4         # Explicit version
+bcrypt==4.3.0          # Explicit version
+# py-bcrypt==0.4         # Explicitly add py-bcrypt # Removing this for now
 pydantic>=2.5.0
 pydantic-settings>=2.1.0
 python-multipart>=0.0.6 
