@@ -33,9 +33,9 @@ from dto import (
 from database import (
     get_db, engine, SessionLocal, 
     # Rename imports for clarity
-    # create_valkey_pool as startup_create_pool, 
-    # close_valkey_pool as shutdown_close_pool, 
-    # get_valkey_connection 
+    create_valkey_pool, # Make sure this is imported
+    close_valkey_pool,  # Make sure this is imported
+    get_valkey_connection 
 )
 from models import Base, User
 from repositories import ConversationRepository, MessageRepository, UserRepository
@@ -664,15 +664,15 @@ async def reset_all_pins_endpoint(token: str = Depends(get_token_header), db: Se
 @app.on_event("startup")
 async def startup_event():
     logger.info("Application startup...")
-    # logger.info("Creating Valkey connection pool...") # Update log message
-    # await startup_create_pool() # Call renamed function
+    logger.info("Creating Valkey/Redis connection pool...")
+    await create_valkey_pool()
     # Add other startup tasks if needed
 
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.info("Application shutdown...")
-    # logger.info("Closing Valkey connection pool...") # Update log message
-    # await shutdown_close_pool() # Call renamed function
+    logger.info("Closing Valkey/Redis connection pool...")
+    await close_valkey_pool()
     # Add other shutdown tasks if needed
 
 if __name__ == "__main__":

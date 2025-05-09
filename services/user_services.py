@@ -8,16 +8,20 @@ from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel
+import json
 
-from database import get_db
+from database import get_db, get_valkey_connection
 from models import User
-from dto import UserDto, CreateUserDto, TokenData, LoginDto
+from dto import UserDto, CreateUserDto, TokenData, LoginDto, ConversationDto
 from repositories import UserRepository, ConversationRepository, MessageRepository
 from auth import create_access_token, SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Cache TTL for conversation details (e.g., 5 minutes)
+CONVERSATION_CACHE_TTL_SECONDS = 300
 
 # Security configuration
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -306,63 +310,72 @@ async def delete_conversation(conversation_id: str, current_user_email: str, db:
             detail=f"Could not delete conversation: {e}"
         )
 
-async def get_conversation_details(conversation_id: str, current_user_email: str, db: Session):
+async def get_conversation_details(conversation_id: str, current_user_email: str, db: Session) -> ConversationDto:
     """
-    Get detailed information about a specific conversation.
-    
-    Args:
-        conversation_id: ID of the conversation
-        current_user_email: Email of the authenticated user
-        db: Database session
-        
-    Returns:
-        Conversation DTO with details
-        
-    Raises:
-        HTTPException: If conversation not found or user lacks permission
+    Get detailed information about a specific conversation for the authenticated user.
+    Implements cache-aside (lazy loading) pattern with Redis.
     """
     logger = logging.getLogger(__name__)
-    conversation_repo = ConversationRepository(db)
-    message_repo = MessageRepository(db)
     
-    # Find the conversation
+    redis_conn = await get_valkey_connection()
+    cache_key = f"conversation_details:{conversation_id}:{current_user_email}"
+
+    if redis_conn:
+        try:
+            cached_data_json = await redis_conn.get(cache_key)
+            if cached_data_json:
+                logger.info(f"Cache HIT for conversation details: {cache_key}")
+                # Directly parse into ConversationDto if it's stored as such
+                conversation_dto = ConversationDto.model_validate_json(cached_data_json)
+                return conversation_dto
+            else:
+                logger.info(f"Cache MISS for conversation details: {cache_key}")
+        except Exception as e:
+            logger.error(f"Redis GET error for {cache_key}: {e}", exc_info=True)
+            # Proceed to fetch from DB if Redis fails, don't let cache error break the app
+
+    # Cache miss or Redis error, fetch from DB
+    conversation_repo = ConversationRepository(db)
     conversation = conversation_repo.get_by_id(conversation_id)
+
     if not conversation:
-        logger.warning(f"Conversation {conversation_id} not found")
+        logger.warning(f"Conversation {conversation_id} not found in DB.")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Conversation not found"
         )
-    
-    # Authorization Check: Ensure the current user owns the conversation
+
+    # Authorization Check
     if conversation.user_email != current_user_email:
         logger.warning(f"User {current_user_email} forbidden to access conversation {conversation_id} owned by {conversation.user_email}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to access this conversation"
         )
+
+    # Convert DB model to DTO
+    # Assuming conversation_repo.to_dto exists and works correctly
+    conversation_dto = conversation_repo.to_dto(conversation) 
     
-    # Get latest message
+    # Add latest message if your DTO and to_dto method handle it
+    # This might require fetching the latest message separately if not already part of 'conversation'
+    message_repo = MessageRepository(db)
     latest_messages = message_repo.get_for_conversation(conversation_id, limit=1, offset=0)
-    
-    # Create DTO
-    conv_dto = conversation_repo.to_dto(conversation)
-    
-    # Add latest message if available
     if latest_messages:
-        latest_message = message_repo.to_dto(latest_messages[0])
-        conv_dto.latest_message = latest_message
-    
-    # Get message count
-    message_count = message_repo.count_for_conversation(conversation_id)
-    
-    # Return conversation details with additional information
-    return {
-        "conversation": conv_dto,
-        "message_count": message_count,
-        "created_at": conversation.created_at,
-        "updated_at": conversation.updated_at
-    }
+        conversation_dto.latest_message = message_repo.to_dto(latest_messages[0])
+
+
+    if redis_conn:
+        try:
+            # Serialize DTO to JSON for storing in Redis
+            conversation_dto_json = conversation_dto.model_dump_json()
+            await redis_conn.set(cache_key, conversation_dto_json, ex=CONVERSATION_CACHE_TTL_SECONDS)
+            logger.info(f"Stored conversation details in cache: {cache_key} with TTL {CONVERSATION_CACHE_TTL_SECONDS}s")
+        except Exception as e:
+            logger.error(f"Redis SET error for {cache_key}: {e}", exc_info=True)
+            # Log error but proceed, data is already fetched from DB
+
+    return conversation_dto
 
 async def get_user_conversations(current_user_email: str, db: Session = None):
     """
