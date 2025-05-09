@@ -16,6 +16,8 @@ class ThreadSafeTTLCache:
     def __init__(self, maxsize: int, ttl: int):
         self.cache = TTLCache(maxsize, ttl)
         self.lock = Lock()
+        self.maxsize = maxsize
+        self.ttl = ttl
 
     def __getitem__(self, key):
         with self.lock:
