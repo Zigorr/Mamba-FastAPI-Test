@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict, Any, Type, TypeVar, Generic
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 from sqlalchemy import and_, or_, desc, select, asc
 from sqlalchemy.sql import func
 import datetime
@@ -184,35 +184,35 @@ class ConversationRepository(BaseRepository[Conversation]):
         self.db.refresh(conversation)
         return conversation
     
-    def load_threads(self, conversation_id: str):
-        conversation = self.get_by_id(conversation_id)
-        return conversation.threads
+    def load_threads(self, conversation_id: str) -> Optional[dict]:
+        """Load only the 'threads' field of a conversation."""
+        result = self.db.query(Conversation.threads).filter(Conversation.id == conversation_id).scalar_one_or_none()
+        return result
 
     def save_threads(self, conversation_id: str, threads: dict):
-        conversation = self.get_by_id(conversation_id)
-        conversation.threads = threads
+        """Save only the 'threads' field of a conversation."""
+        self.db.query(Conversation).filter(Conversation.id == conversation_id).update({Conversation.threads: threads, Conversation.updated_at: func.now()})
         self.db.commit()
-        self.db.refresh(conversation)
 
-    def load_settings(self, conversation_id: str):
-        conversation = self.get_by_id(conversation_id)
-        return conversation.settings
+    def load_settings(self, conversation_id: str) -> Optional[list]: # Assuming settings is a list
+        """Load only the 'settings' field of a conversation."""
+        result = self.db.query(Conversation.settings).filter(Conversation.id == conversation_id).scalar_one_or_none()
+        return result
 
     def save_settings(self, conversation_id: str, settings: list):
-        conversation = self.get_by_id(conversation_id)
-        conversation.settings = settings
+        """Save only the 'settings' field of a conversation."""
+        self.db.query(Conversation).filter(Conversation.id == conversation_id).update({Conversation.settings: settings, Conversation.updated_at: func.now()})
         self.db.commit()
-        self.db.refresh(conversation)
 
-    def load_shared_state(self, conversation_id: str):
-        conversation = self.get_by_id(conversation_id)
-        return conversation.shared_state
+    def load_shared_state(self, conversation_id: str) -> Optional[dict]:
+        """Load only the 'shared_state' field of a conversation."""
+        result = self.db.query(Conversation.shared_state).filter(Conversation.id == conversation_id).scalar_one_or_none()
+        return result
 
     def save_shared_state(self, conversation_id: str, shared_state: dict):
-        conversation = self.get_by_id(conversation_id)
-        conversation.shared_state = shared_state
+        """Save only the 'shared_state' field of a conversation."""
+        self.db.query(Conversation).filter(Conversation.id == conversation_id).update({Conversation.shared_state: shared_state, Conversation.updated_at: func.now()})
         self.db.commit()
-        self.db.refresh(conversation)
 
     def update_conversation(self, conversation_id: str) -> Optional[Conversation]:
         """Manually update the `updated_at` timestamp for a conversation."""
@@ -246,12 +246,18 @@ class ConversationRepository(BaseRepository[Conversation]):
         if not conversation:
             return None
         
-        # Toggle the is_pinned status
-        conversation.is_pinned = not conversation.is_pinned
-        
+        # Toggle the is_pinned status and update timestamp
+        self.db.query(Conversation).filter(Conversation.id == conversation_id).update({
+            Conversation.is_pinned: not conversation.is_pinned,
+            Conversation.updated_at: func.now()
+        })
         self.db.commit()
-        self.db.refresh(conversation)
-        return conversation
+        # To return the updated conversation, we need to refresh or re-fetch it.
+        # For simplicity and performance, this method might not need to return the full object.
+        # If the updated object is needed, uncomment the next line, but it adds a query.
+        # self.db.refresh(conversation) 
+        # Alternatively, just fetch it again if needed by the caller, or modify the method signature.
+        return self.get_by_id(conversation_id) # Re-fetch to get the updated object with new timestamp
 
 class MessageRepository(BaseRepository[Message]):
     """Repository for Message entity."""
@@ -314,10 +320,11 @@ class MessageRepository(BaseRepository[Message]):
         return result.scalars().all()
     
     def count_for_conversation(self, conversation_id: str) -> int:
-        """Get the total count of messages in a conversation."""
-        query = select(Message).where(Message.conversation_id == conversation_id)
-        result = self.db.execute(query)
-        return len(result.scalars().all())
+        """Get the total count of messages in a conversation efficiently."""
+        # Use func.count() for an efficient database count query
+        query = select(func.count(Message.id)).where(Message.conversation_id == conversation_id)
+        count = self.db.execute(query).scalar_one_or_none()
+        return count if count is not None else 0
     
     def create_from_dto(self, dto: SendMessageDto, sender_email: str, is_from_agency: bool = False) -> Message:
         """Create a message from DTO."""

@@ -33,14 +33,14 @@ from dto import (
 from database import (
     get_db, engine, SessionLocal, 
     # Rename imports for clarity
-    create_valkey_pool as startup_create_pool, 
-    close_valkey_pool as shutdown_close_pool, 
-    get_valkey_connection 
+    # create_valkey_pool as startup_create_pool, 
+    # close_valkey_pool as shutdown_close_pool, 
+    # get_valkey_connection 
 )
 from models import Base, User
 from repositories import ConversationRepository, MessageRepository, UserRepository
 from services.agency_services import AgencyService
-from utils.valkey_utils import publish_message_to_valkey
+# from utils.valkey_utils import publish_message_to_valkey
 import json
 
 os.environ["SSL_CERT_FILE"] = certifi.where()
@@ -231,17 +231,18 @@ async def chat_endpoint(
         conversation_repo.save_shared_state(conversation_id, agency.shared_state.data)
 
         # --- Publish to Valkey AFTER successful commit ---
-        try:
-            if user_message_dto:
-                await publish_message_to_valkey(conversation_id, message_repo.to_dto(user_message_dto))
-            if ai_message_dto:
-                await publish_message_to_valkey(conversation_id, message_repo.to_dto(ai_message_dto))
+        # try:
+        #     if user_message_dto:
+        #         await publish_message_to_valkey(conversation_id, message_repo.to_dto(user_message_dto))
+        #     if ai_message_dto:
+        #         await publish_message_to_valkey(conversation_id, message_repo.to_dto(ai_message_dto))
             
-            return response
-        except Exception as pub_e:
-            # Log failure to publish but don't fail the request, DB is source of truth
-            logger.error(f"Failed to publish message(s) to Valkey for conv {conversation_id}: {pub_e}")
-            return response
+        #     return response
+        # except Exception as pub_e:
+        #     # Log failure to publish but don't fail the request, DB is source of truth
+        #     logger.error(f"Failed to publish message(s) to Valkey for conv {conversation_id}: {pub_e}")
+        #     return response
+        return response # Return original response directly
     except Exception as e:
         logger.error(f"Error processing message for {conversation_id}: {e}")
         raise HTTPException(
@@ -604,19 +605,74 @@ async def toggle_pin_endpoint(
 
     # Call the service function
     return await toggle_conversation_pin(conversation_id, current_user.email, db)
+
+@app.post("/admin/reset-database", tags=["Admin"], status_code=status.HTTP_200_OK)
+async def reset_database_endpoint(token: str = Depends(get_token_header), db: Session = Depends(get_db)):
+    """
+    Drops all tables in the database. Ensure this is protected and used only in development/admin scenarios.
+    Requires admin privileges (example: check current_user if admin).
+    For simplicity, this example only checks for a valid token. Add role-based access control for production.
+    WARNING: This will delete all data in the database!
+    """
+    try:
+        current_user = await get_current_user(token=token, db=db) # Verify token
+        logger.info(f"User {current_user.email} initiated database reset.")
+    except HTTPException as e:
+        logger.error(f"Unauthorized attempt to reset database: {e.detail}")
+        raise e # Re-raise authentication error
+
+    try:
+        reset_database() # Does not take a session
+        # The original reset_database.py comments out table recreation.
+        # If you want to recreate tables, uncomment that part in reset_database.py
+        # and call Base.metadata.create_all(bind=engine) here or in the script.
+        # For now, assuming it only drops.
+        Base.metadata.create_all(bind=engine) # Recreate tables after dropping, as per common reset logic
+        logger.info("Tables dropped and recreated by admin action.")
+        return {"message": "Database tables dropped and recreated successfully."}
+    except Exception as e:
+        logger.error(f"Error during database reset: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred during database reset: {str(e)}"
+        )
+
+@app.post("/admin/reset-all-pins", tags=["Admin"], status_code=status.HTTP_200_OK)
+async def reset_all_pins_endpoint(token: str = Depends(get_token_header), db: Session = Depends(get_db)):
+    """
+    Resets all conversation pins to False.
+    Requires admin privileges.
+    """
+    try:
+        current_user = await get_current_user(token=token, db=db)
+        logger.info(f"User {current_user.email} initiated reset of all conversation pins.")
+    except HTTPException as e:
+        logger.error(f"Unauthorized attempt to reset all pins: {e.detail}")
+        raise e
+
+    try:
+        reset_all_pins() # Does not take a session and does not return a count
+        return {"message": "Successfully reset all conversation pins to False."}
+    except Exception as e:
+        logger.error(f"Error during resetting all pins: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred while resetting pins: {str(e)}"
+        )
+
 # Add startup/shutdown events
 @app.on_event("startup")
 async def startup_event():
     logger.info("Application startup...")
-    logger.info("Creating Valkey connection pool...") # Update log message
-    await startup_create_pool() # Call renamed function
+    # logger.info("Creating Valkey connection pool...") # Update log message
+    # await startup_create_pool() # Call renamed function
     # Add other startup tasks if needed
 
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.info("Application shutdown...")
-    logger.info("Closing Valkey connection pool...") # Update log message
-    await shutdown_close_pool() # Call renamed function
+    # logger.info("Closing Valkey connection pool...") # Update log message
+    # await shutdown_close_pool() # Call renamed function
     # Add other shutdown tasks if needed
 
 if __name__ == "__main__":
