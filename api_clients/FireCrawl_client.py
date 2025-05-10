@@ -44,10 +44,7 @@ class FireCrawlClient:
     
     @staticmethod
     def extract_products_from_website(url: str) -> str:
-        class PersonaSchema(BaseModel):
-            persona: str
-            description: str
-            priority: int
+        url = f"{url}/*"
         class ProductSchema(BaseModel):
             url: str
             language: str
@@ -56,18 +53,19 @@ class FireCrawlClient:
             priority: int
         class ExtractSchema(BaseModel):
             products: list[ProductSchema]
-            targe_personas: list[PersonaSchema]
-        prompt = f"""
-        Scrape the company website for:
-        - products: where each product has url, locale language in ISO 639-1 codes, its official brand name, a very short description for the product, and a priority score from 1-10 measuring how important sales of this product are to the company.
-        - target_personas: where each persona has its name, short description, and a priority score from 1-10 measuring how important this persona matters to the business. 
+            company_summary: str
+
+        prompt = """
+        Scrape the company website for the following:
+        - products: Each product must include its URL, locale language using ISO 639-1 codes (e.g., "en"), its official brand name, a *very short* description of the product, and a priority score from 1 to 10 measuring the product's importance to the company.
+        - company_summary: A concise summary of who this company is, what they do, what types of products/services they offer.
         """
         return FireCrawlClient._extract(url, prompt, ExtractSchema)
 
 if __name__ == "__main__":
 
     import json
-    site_url = "https://www.logitechg.com/*"
+    site_url = "https://www.logitechg.com"
     url = "https://www.logitechg.com/en-nz/products/gaming-mice/g402-hyperion-fury-fps-gaming-mouse.910-004070.html"
     response = FireCrawlClient.extract_products_from_website(site_url)
     print(response)
