@@ -49,6 +49,7 @@ def register_user(user_data: CreateUserDto, db: Session) -> UserDto:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Email address is not valid. Status: {validation_response.status}"
                 )
+                
             logger.info(f"ZeroBounce validation successful for {user_data.email}")
         except HTTPException: # Re-raise the HTTPException from the validation status check
             raise

@@ -249,7 +249,11 @@ async def create_chat(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You do not have access to this project"
             )
-
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Project ID is required"
+        )
     # Create new conversation
     conversation_repo = ConversationRepository(db)
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
