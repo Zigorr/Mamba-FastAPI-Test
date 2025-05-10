@@ -23,6 +23,18 @@ class Settings(BaseSettings):
     # OpenAI (if needed directly from settings)
     OPENAI_API_KEY: Optional[str] = None 
 
+    # ZeroBounce API Key
+    ZEROBOUNCE_API_KEY: Optional[str] = None
+
+    # Google OAuth Client ID
+    GOOGLE_CLIENT_ID: Optional[str] = None
+
+    # Default token limit for free users
+    DEFAULT_FREE_USER_TOKEN_LIMIT: int = 800
+
+    # Default password for users created via Google Sign-In
+    GOOGLE_USER_DEFAULT_PASSWORD: str = "google_user_strong_default_password_#@!"
+
     # Add other environment variables here as needed
     SSL_CERT_FILE: Optional[str] = None # For certifi.where()
 

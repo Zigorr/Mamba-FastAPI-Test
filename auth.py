@@ -89,3 +89,17 @@ async def get_current_admin_user(current_user: User = Depends(get_current_user))
             detail="User does not have admin privileges."
         )
     return current_user 
+
+# For Google Auth
+from google.oauth2 import id_token # type: ignore
+from google.auth.transport import requests as google_requests # type: ignore
+
+async def verify_google_id_token(token: str, client_id: str) -> Optional[dict]:
+    """Verifies Google ID token and returns user info."""
+    try:
+        # Specify the CLIENT_ID of the app that accesses the backend:
+        idinfo = id_token.verify_oauth2_token(token, google_requests.Request(), client_id)
+        return idinfo
+    except ValueError:
+        # Invalid token
+        return None

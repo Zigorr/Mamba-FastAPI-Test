@@ -43,13 +43,6 @@ class CreateUserDto(BaseDto):
             raise ValueError(f'{info.field_name} must contain only letters (no spaces, numbers, or special characters)')
         return v
     
-    @field_validator('email')
-    @classmethod
-    def validate_email_domain(cls, v):
-        if not v.endswith('@mamba.agency'):
-            raise ValueError('Email must be from mamba.agency domain')
-        return v
-    
     @field_validator('password')
     @classmethod
     def validate_password(cls, v):
