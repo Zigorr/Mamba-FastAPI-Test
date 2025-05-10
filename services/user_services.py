@@ -50,10 +50,10 @@ def register_user(user_data: CreateUserDto, db: Session) -> UserDto:
                     detail=f"Email address is not valid. Status: {validation_response.status}"
                 )
             logger.info(f"ZeroBounce validation successful for {user_data.email}")
+        except HTTPException: # Re-raise the HTTPException from the validation status check
+            raise
         except ZBException as e:
             logger.error(f"ZeroBounce API error for {user_data.email}: {e}")
-            # Depending on policy, you might want to allow registration or deny it.
-            # For now, let's raise an error to indicate the validation service failed.
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Email validation service is temporarily unavailable. Please try again later."
