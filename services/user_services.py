@@ -16,7 +16,7 @@ from zerobouncesdk import ZeroBounce, ZBException
 from database import get_db, get_valkey_connection
 from models import User
 from dto import UserDto, CreateUserDto, TokenData, LoginDto, ConversationDto
-from repositories import UserRepository, ConversationRepository, MessageRepository
+from repositories import UserRepository, ConversationRepository, MessageRepository, ProjectRepository
 from auth import create_access_token
 from core.config import settings
 
@@ -198,21 +198,18 @@ async def _generate_auth_response(user: User, db: Session) -> dict:
         data={"sub": user.email}, expires_delta=access_token_expires
     )
 
-    conversation_repo = ConversationRepository(db)
-    conversations = conversation_repo.get_for_user(user.email, limit=50) # TODO: Consider pagination or more specific query
-    conversation_summaries = []
-    for conv in conversations:
-        conversation_summaries.append({
-            "id": conv.id,
-            "name": conv.name,
-            "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
-            "is_pinned": conv.is_pinned
+    project_repo = ProjectRepository(db)
+
+    # Get projects
+    projects = project_repo.get_for_user(user.email)
+    project_summaries = []
+    for project in projects:
+        project_summaries.append({
+            "id": project.id,
+            "name": project.name,
+            "website_url": project.website_url,
+            "project_data": project.project_data
         })
-    conversation_summaries = sorted(
-        conversation_summaries, 
-        key=lambda x: (x["is_pinned"], datetime.fromisoformat(x["updated_at"]) if x["updated_at"] else datetime.min),
-        reverse=True
-    )
 
     return {
         "access_token": access_token,
@@ -226,7 +223,7 @@ async def _generate_auth_response(user: User, db: Session) -> dict:
             "is_subscribed": user.is_subscribed,
             "email_verified": user.email_verified
         },
-        "conversations": conversation_summaries
+        "projects": project_summaries
     }
 
 async def login_user(login_data: LoginDto, db: Session) -> dict:

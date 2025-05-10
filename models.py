@@ -55,7 +55,7 @@ class Conversation(Base):
     name = Column(String)
     # Foreign keys
     user_email = Column(String, ForeignKey("users.email"), nullable=False, index=True)
-    project_id = Column(String, ForeignKey("projects.id"), nullable=True, index=True)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=True, index=True)  # Changed back to nullable=True
     # New JSON fields for state storage
     shared_state = Column(JSON, nullable=True, default={})
     threads = Column(JSON, nullable=True, default={})

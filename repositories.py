@@ -266,23 +266,29 @@ class ConversationRepository(BaseRepository[Conversation]):
             is_pinned=conversation.is_pinned
         )
     
-    def update_state(self, conversation_id: str, state_data: Dict[str, Any]) -> Optional[Conversation]:
-        """Update the state fields of a conversation."""
+    def _update_project_timestamp(self, conversation_id: str):
+        """Helper method to update the project's updated_at timestamp when a conversation is updated."""
         conversation = self.get_by_id(conversation_id)
-        if not conversation:
+        if conversation and conversation.project_id:
+            self.db.query(Project).filter(Project.id == conversation.project_id).update(
+                {Project.updated_at: func.now()}
+            )
+            self.db.commit()
+
+    def update(self, id_value, dto_dict):
+        """Update entity with values from DTO dictionary."""
+        entity = self.get_by_id(id_value)
+        if not entity:
             return None
-            
-        # Update only the provided fields
-        if 'shared_state' in state_data:
-            conversation.shared_state = state_data['shared_state']
-        if 'threads' in state_data:
-            conversation.threads = state_data['threads']
-        if 'settings' in state_data:
-            conversation.settings = state_data['settings']
-            
+        
+        for key, value in dto_dict.items():
+            if hasattr(entity, key):
+                setattr(entity, key, value)
+        
         self.db.commit()
-        self.db.refresh(conversation)
-        return conversation
+        self.db.refresh(entity)
+        self._update_project_timestamp(id_value)
+        return entity
     
     def load_threads(self, conversation_id: str) -> Optional[dict]:
         """Load only the 'threads' field of a conversation."""
@@ -294,6 +300,7 @@ class ConversationRepository(BaseRepository[Conversation]):
         """Save only the 'threads' field of a conversation."""
         self.db.query(Conversation).filter(Conversation.id == conversation_id).update({Conversation.threads: threads, Conversation.updated_at: func.now()})
         self.db.commit()
+        self._update_project_timestamp(conversation_id)
 
     def load_settings(self, conversation_id: str) -> Optional[list]: # Assuming settings is a list
         """Load only the 'settings' field of a conversation."""
@@ -305,6 +312,7 @@ class ConversationRepository(BaseRepository[Conversation]):
         """Save only the 'settings' field of a conversation."""
         self.db.query(Conversation).filter(Conversation.id == conversation_id).update({Conversation.settings: settings, Conversation.updated_at: func.now()})
         self.db.commit()
+        self._update_project_timestamp(conversation_id)
 
     def load_shared_state(self, conversation_id: str) -> Optional[dict]:
         """Load only the 'shared_state' field of a conversation."""
@@ -316,6 +324,7 @@ class ConversationRepository(BaseRepository[Conversation]):
         """Save only the 'shared_state' field of a conversation."""
         self.db.query(Conversation).filter(Conversation.id == conversation_id).update({Conversation.shared_state: shared_state, Conversation.updated_at: func.now()})
         self.db.commit()
+        self._update_project_timestamp(conversation_id)
 
     def update_conversation(self, conversation_id: str) -> Optional[Conversation]:
         """Manually update the `updated_at` timestamp for a conversation."""
@@ -326,7 +335,10 @@ class ConversationRepository(BaseRepository[Conversation]):
         )
         if updated:
             self.db.commit()
-            
+            self._update_project_timestamp(conversation_id)
+            return self.get_by_id(conversation_id)
+        return None
+
     def delete_conversation(self, conversation_id: str) -> bool:
         """Deletes a conversation and its associated messages (via cascade)."""
         conversation = self.get_by_id(conversation_id)
@@ -337,14 +349,7 @@ class ConversationRepository(BaseRepository[Conversation]):
         return False
 
     def toggle_pin(self, conversation_id: str) -> Optional[Conversation]:
-        """Toggle the pinned status of a conversation.
-        
-        Args:
-            conversation_id: The ID of the conversation to toggle
-            
-        Returns:
-            Updated conversation or None if not found
-        """
+        """Toggle the pinned status of a conversation."""
         conversation = self.get_by_id(conversation_id)
         if not conversation:
             return None
@@ -355,12 +360,8 @@ class ConversationRepository(BaseRepository[Conversation]):
             Conversation.updated_at: func.now()
         })
         self.db.commit()
-        # To return the updated conversation, we need to refresh or re-fetch it.
-        # For simplicity and performance, this method might not need to return the full object.
-        # If the updated object is needed, uncomment the next line, but it adds a query.
-        # self.db.refresh(conversation) 
-        # Alternatively, just fetch it again if needed by the caller, or modify the method signature.
-        return self.get_by_id(conversation_id) # Re-fetch to get the updated object with new timestamp
+        self._update_project_timestamp(conversation_id)
+        return self.get_by_id(conversation_id)
 
 class MessageRepository(BaseRepository[Message]):
     """Repository for Message entity."""
