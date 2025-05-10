@@ -15,6 +15,7 @@ class User(Base):
     token_limit = Column(Integer, nullable=True)  # Can be null for unlimited
     is_subscribed = Column(Boolean, default=False, nullable=False)
     tokens_last_reset_at = Column(DateTime(timezone=True), nullable=True) # Tracks when tokens were last reset
+    email_verified = Column(Boolean, nullable=True, server_default=text('false')) # Indicates if the email was verified by an OAuth provider
     # Relationships
     conversations = relationship("Conversation", back_populates="user", cascade="all, delete-orphan")
     messages = relationship("Message", back_populates="sender")
