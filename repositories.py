@@ -6,11 +6,12 @@ import datetime
 import uuid
 import pickle
 
-from models import User, Conversation, Message
+from models import User, Conversation, Message, Project
 from dto import (
     UserDto, CreateUserDto, 
     ConversationDto, CreateConversationDto,
     MessageDto, SendMessageDto,
+    ProjectDto, CreateProjectDto,
 )
 
 T = TypeVar('T')
@@ -90,6 +91,62 @@ class UserRepository(BaseRepository[User]):
             last_name=user.last_name
         )
 
+class ProjectRepository(BaseRepository[Project]):
+    """Repository for Project entity."""
+    
+    def __init__(self, db: Session):
+        super().__init__(db, Project)
+    
+    def get_by_id(self, project_id: str) -> Optional[Project]:
+        """Get project by ID."""
+        return self.db.query(Project).filter(Project.id == project_id).first()
+    
+    def get_for_user(self, email: str) -> List[Project]:
+        """Get all projects for a specific user."""
+        return self.db.query(Project).filter(Project.user_email == email).all()
+    
+    def create_from_dto(self, dto: CreateProjectDto, user_email: str) -> Project:
+        """Create a new project from DTO."""
+        # Generate ID if not provided
+        project_id = f"proj-{uuid.uuid4()}"
+        
+        # Create project
+        db_project = Project(
+            id=project_id,
+            name=dto.name,
+            website_url=dto.website_url,
+            project_data=dto.project_data or {},
+            user_email=user_email  # Set the owner of the project
+        )
+        self.db.add(db_project)
+        
+        # Commit changes
+        self.db.commit()
+        self.db.refresh(db_project)
+        
+        return db_project
+    
+    def to_dto(self, project: Project) -> ProjectDto:
+        """Convert Project model to ProjectDto."""
+        return ProjectDto(
+            id=project.id,
+            name=project.name,
+            website_url=project.website_url,
+            project_data=project.project_data,
+            user_email=project.user_email
+        )
+    
+    def update_project_data(self, project_id: str, project_data: Dict[str, Any]) -> Optional[Project]:
+        """Update the project_data field of a project."""
+        project = self.get_by_id(project_id)
+        if not project:
+            return None
+            
+        project.project_data = project_data
+        self.db.commit()
+        self.db.refresh(project)
+        return project
+
 class ConversationRepository(BaseRepository[Conversation]):
     """Repository for Conversation entity."""
     
@@ -100,7 +157,7 @@ class ConversationRepository(BaseRepository[Conversation]):
         """Get conversation by ID."""
         return self.db.query(Conversation).filter(Conversation.id == conversation_id).first()
     
-    def get_for_user(self, email: str, limit: int = 50, offset: int = 0, ascending: bool = False) -> List[Conversation]:
+    def get_for_user(self, email: str, limit: int = 50, offset: int = 0, ascending: bool = False, project_id: Optional[str] = None) -> List[Conversation]:
         """
         Get conversations owned by a user with pagination.
         
@@ -110,6 +167,7 @@ class ConversationRepository(BaseRepository[Conversation]):
             offset: Number of conversations to skip
             ascending: If True, order by updated_at ascending (oldest first), 
                       otherwise descending (newest first)
+            project_id: Optional filter for conversations belonging to a specific project
         
         Returns:
             List of conversations, with pinned conversations first, then sorted by updated_at
@@ -117,6 +175,45 @@ class ConversationRepository(BaseRepository[Conversation]):
         # Base query for user's conversations
         query = self.db.query(Conversation).filter(
             Conversation.user_email == email
+        )
+        
+        # Filter by project if specified
+        if project_id:
+            query = query.filter(Conversation.project_id == project_id)
+        
+        # Sort by is_pinned (True first) and then by updated_at
+        if ascending:
+            query = query.order_by(Conversation.is_pinned.desc(), Conversation.updated_at.asc())
+        else:
+            query = query.order_by(Conversation.is_pinned.desc(), Conversation.updated_at.desc())
+        
+        # Apply offset if specified
+        if offset > 0:
+            query = query.offset(offset)
+        
+        # Apply limit if specified (non-zero)
+        if limit > 0:
+            query = query.limit(limit)
+            
+        return query.all()
+    
+    def get_for_project(self, project_id: str, limit: int = 50, offset: int = 0, ascending: bool = False) -> List[Conversation]:
+        """
+        Get conversations for a specific project with pagination.
+        
+        Args:
+            project_id: The project ID
+            limit: Maximum number of conversations (0 for all)
+            offset: Number of conversations to skip
+            ascending: If True, order by updated_at ascending (oldest first), 
+                      otherwise descending (newest first)
+        
+        Returns:
+            List of conversations, with pinned conversations first, then sorted by updated_at
+        """
+        # Base query for project's conversations
+        query = self.db.query(Conversation).filter(
+            Conversation.project_id == project_id
         )
         
         # Sort by is_pinned (True first) and then by updated_at
@@ -140,11 +237,13 @@ class ConversationRepository(BaseRepository[Conversation]):
         # Generate ID if not provided
         conversation_id = f"conv-{uuid.uuid4()}"
         
+        # Convert to DB dict
+        db_dict = dto.to_db_dict(creator_email)
+        
         # Create conversation
         db_conversation = Conversation(
             id=conversation_id,
-            name=dto.name,
-            user_email=creator_email  # Set the owner of the conversation
+            **db_dict
         )
         self.db.add(db_conversation)
         
@@ -160,6 +259,7 @@ class ConversationRepository(BaseRepository[Conversation]):
             id=conversation.id,
             name=conversation.name,
             user_email=conversation.user_email,
+            project_id=conversation.project_id,
             shared_state=conversation.shared_state,
             threads=conversation.threads,
             settings=conversation.settings,

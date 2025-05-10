@@ -28,7 +28,8 @@ from dto import (
     CreateUserDto, UserDto, LoginDto, 
     ConversationDto, CreateConversationDto,
     MessageDto, SendMessageDto, ConversationStateDto,
-    UpdateConversationStateDto, RenameConversationDto
+    UpdateConversationStateDto, RenameConversationDto,
+    ProjectDto, CreateProjectDto, UpdateProjectDataDto
 )
 
 # Database and Models
@@ -40,7 +41,7 @@ from database import (
     get_valkey_connection 
 )
 from models import Base, User
-from repositories import ConversationRepository, MessageRepository, UserRepository
+from repositories import ConversationRepository, MessageRepository, UserRepository, ProjectRepository
 from services.agency_services import AgencyService
 # from utils.valkey_utils import publish_message_to_valkey
 import json
@@ -94,6 +95,10 @@ app = FastAPI(
         {
             "name": "Admin",
             "description": "Administrative operations"
+        },
+        {
+            "name": "Projects",
+            "description": "Operations related to projects"
         }
     ],
     lifespan=lifespan # Add the lifespan manager here
@@ -130,6 +135,55 @@ async def login_for_access_token(login_data: LoginDto, db=Depends(get_db)):
     """Login a user and return an access token."""
     return await login_user(login_data, db)
 
+@app.post("/projects", response_model=ProjectDto, tags=["Projects"])
+async def create_project(
+    project_data: CreateProjectDto,
+    token: str = Depends(get_token_header),
+    db: Session = Depends(get_db)
+):
+    """Create a new project."""
+    # Verify token and get current user
+    try:
+        current_user = await get_current_user(token=token, db=db)
+        logger.info(f"User {current_user.email} authenticated for new project creation")
+    except HTTPException as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Authentication failed: {e.detail}"
+        )
+    
+    # Create project repository
+    project_repo = ProjectRepository(db)
+    
+    # Create project from DTO
+    project = project_repo.create_from_dto(project_data, current_user.email)
+    
+    logger.info(f"Created new project {project.id} for user {current_user.email}")
+    
+    # Return the project as DTO
+    return project_repo.to_dto(project)
+
+@app.get("/projects", response_model=list[ProjectDto], tags=["Projects"])
+async def get_user_projects(
+    token: str = Depends(get_token_header),
+    db: Session = Depends(get_db)
+):
+    """Get all projects for the current user."""
+    try:
+        current_user = await get_current_user(token=token, db=db)
+    except HTTPException as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Authentication failed: {e.detail}"
+        )
+    
+    # Get projects for user
+    project_repo = ProjectRepository(db)
+    projects = project_repo.get_for_user(current_user.email)
+    
+    # Convert to DTOs
+    return [project_repo.to_dto(project) for project in projects]
+
 @app.post("/chat", tags=["Chat"])
 async def create_chat(
     request: dict,
@@ -154,11 +208,33 @@ async def create_chat(
             detail="Message is required"
         )
 
+    # Get project_id from request (if provided)
+    project_id = request.get("project_id")
+    
+    # If project_id is provided, verify it exists and belongs to the user
+    if project_id:
+        project_repo = ProjectRepository(db)
+        project = project_repo.get_by_id(project_id)
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Project not found"
+            )
+        if project.user_email != current_user.email:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have access to this project"
+            )
+
     # Create new conversation
     conversation_repo = ConversationRepository(db)
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conversation_dto = CreateConversationDto(
+        name=f"Chat @{timestamp}", 
+        project_id=project_id
+    )
     conversation = conversation_repo.create_from_dto(
-        CreateConversationDto(name=f"Chat @{timestamp}"),
+        conversation_dto,
         creator_email=current_user.email
     )
 
@@ -379,6 +455,7 @@ async def get_messages_flexible(
 async def get_conversations_with_messages(
     limit: int = Query(20, description="Maximum number of conversations to retrieve"),
     offset: int = Query(0, description="Number of conversations to skip"),
+    project_id: str = Query(None, description="Filter conversations by project ID"),
     token: str = Depends(get_token_header),
     db: Session = Depends(get_db)
 ):
@@ -393,11 +470,31 @@ async def get_conversations_with_messages(
             detail=f"Authentication failed: {e.detail}"
         )
     
+    # If project_id is provided, verify it exists and belongs to the user
+    if project_id:
+        project_repo = ProjectRepository(db)
+        project = project_repo.get_by_id(project_id)
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Project not found"
+            )
+        if project.user_email != current_user.email:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have access to this project"
+            )
+    
     # Get conversations for user
     conversation_repo = ConversationRepository(db)
     message_repo = MessageRepository(db)
     
-    conversations = conversation_repo.get_for_user(current_user.email, limit, offset)
+    conversations = conversation_repo.get_for_user(
+        email=current_user.email, 
+        limit=limit, 
+        offset=offset,
+        project_id=project_id
+    )
     result = []
     
     # For each conversation, get the latest message
@@ -647,6 +744,144 @@ async def toggle_pin_endpoint(
 
     # Call the service function
     return await toggle_conversation_pin(conversation_id, current_user.email, db)
+
+@app.get("/projects/{project_id}", response_model=ProjectDto, tags=["Projects"])
+async def get_project_details(
+    project_id: str,
+    token: str = Depends(get_token_header),
+    db: Session = Depends(get_db)
+):
+    """Get details for a specific project."""
+    try:
+        current_user = await get_current_user(token=token, db=db)
+    except HTTPException as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Authentication failed: {e.detail}"
+        )
+    
+    # Get project repository
+    project_repo = ProjectRepository(db)
+    
+    # Get project by ID
+    project = project_repo.get_by_id(project_id)
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found"
+        )
+    
+    # Verify ownership
+    if project.user_email != current_user.email:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this project"
+        )
+    
+    # Return project as DTO
+    return project_repo.to_dto(project)
+
+@app.patch("/projects/{project_id}/update-data", response_model=ProjectDto, tags=["Projects"])
+async def update_project_data(
+    project_id: str,
+    update_data: UpdateProjectDataDto,
+    token: str = Depends(get_token_header),
+    db: Session = Depends(get_db)
+):
+    """Update project data for a specific project."""
+    try:
+        current_user = await get_current_user(token=token, db=db)
+    except HTTPException as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Authentication failed: {e.detail}"
+        )
+    
+    # Get project repository
+    project_repo = ProjectRepository(db)
+    
+    # Get project by ID
+    project = project_repo.get_by_id(project_id)
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found"
+        )
+    
+    # Verify ownership
+    if project.user_email != current_user.email:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this project"
+        )
+    
+    # Update project data
+    updated_project = project_repo.update_project_data(project_id, update_data.project_data)
+    if not updated_project:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update project data"
+        )
+    
+    # Return updated project as DTO
+    return project_repo.to_dto(updated_project)
+
+@app.get("/projects/{project_id}/conversations", tags=["Projects"])
+async def get_conversations_for_project(
+    project_id: str,
+    limit: int = Query(20, description="Maximum number of conversations to retrieve"),
+    offset: int = Query(0, description="Number of conversations to skip"),
+    token: str = Depends(get_token_header),
+    db: Session = Depends(get_db)
+):
+    """Get conversations for a specific project."""
+    try:
+        current_user = await get_current_user(token=token, db=db)
+    except HTTPException as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Authentication failed: {e.detail}"
+        )
+    
+    # Verify project exists and belongs to user
+    project_repo = ProjectRepository(db)
+    project = project_repo.get_by_id(project_id)
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found"
+        )
+    
+    if project.user_email != current_user.email:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this project"
+        )
+    
+    # Get conversations for project
+    conversation_repo = ConversationRepository(db)
+    message_repo = MessageRepository(db)
+    
+    conversations = conversation_repo.get_for_project(
+        project_id=project_id,
+        limit=limit,
+        offset=offset
+    )
+    result = []
+    
+    # For each conversation, get the latest message
+    for conversation in conversations:
+        conv_dto = conversation_repo.to_dto(conversation)
+        latest_messages = message_repo.get_for_conversation(conversation.id, limit=1, offset=0)
+        
+        # Add latest message preview if available
+        if latest_messages:
+            latest_message = message_repo.to_dto(latest_messages[0])
+            conv_dto.latest_message = latest_message
+        
+        result.append(conv_dto)
+    
+    return {"conversations": result}
 
 if __name__ == "__main__":
     print("Starting FastAPI server...")

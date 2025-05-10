@@ -15,6 +15,7 @@ class User(Base):
     # Relationships
     conversations = relationship("Conversation", back_populates="user", cascade="all, delete-orphan")
     messages = relationship("Message", back_populates="sender")
+    projects = relationship("Project", back_populates="user", cascade="all, delete-orphan")
     created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
     updated_at = Column(DateTime(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()"))
     
@@ -23,13 +24,34 @@ class User(Base):
         Index('idx_user_name_email', 'first_name', 'last_name', 'email'),
     )
 
+class Project(Base):
+    __tablename__ = "projects"
+    
+    id = Column(String, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    website_url = Column(String, nullable=True)
+    project_data = Column(JSON, nullable=True, default={})
+    user_email = Column(String, ForeignKey("users.email"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
+    updated_at = Column(DateTime(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()"))
+    
+    # Relationships
+    user = relationship("User", back_populates="projects")
+    conversations = relationship("Conversation", back_populates="project", cascade="all, delete-orphan")
+    
+    # Index for better query performance
+    __table_args__ = (
+        Index('idx_project_user', 'user_email'),
+    )
+
 class Conversation(Base):
     __tablename__ = "conversations"
     
     id = Column(String, primary_key=True, index=True)
     name = Column(String)
-    # Foreign key to user
+    # Foreign keys
     user_email = Column(String, ForeignKey("users.email"), nullable=False, index=True)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=True, index=True)
     # New JSON fields for state storage
     shared_state = Column(JSON, nullable=True, default={})
     threads = Column(JSON, nullable=True, default={})
@@ -37,6 +59,7 @@ class Conversation(Base):
     is_pinned = Column(Boolean, default=False)  # New column for pinned status
     # Relationships
     user = relationship("User", back_populates="conversations")
+    project = relationship("Project", back_populates="conversations")
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
     created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
     updated_at = Column(DateTime(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()"))
@@ -44,6 +67,7 @@ class Conversation(Base):
     # Add index to improve query performance on frequently filtered fields
     __table_args__ = (
         Index('idx_conv_user_updated', 'user_email', 'updated_at'),
+        Index('idx_conv_project', 'project_id'),
     )
 
 class Message(Base):

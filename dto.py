@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, field_validator, HttpUrl
 from typing import Optional, List, Set, Dict, Any, Type, TypeVar, Generic, ForwardRef
 import re
 import datetime
@@ -69,12 +69,43 @@ class LoginDto(BaseDto):
     email: EmailStr
     password: str
 
+# Project DTOs
+class ProjectDto(BaseDto):
+    id: str
+    name: str
+    website_url: Optional[str] = None
+    project_data: Optional[Dict[str, Any]] = None
+    user_email: str
+    
+    model_config = {
+        "from_attributes": True
+    }
+
+class CreateProjectDto(BaseDto):
+    name: str
+    website_url: Optional[str] = None
+    project_data: Optional[Dict[str, Any]] = None
+    
+    def to_db_dict(self, user_email: str):
+        """Convert to dict suitable for creating a Project model."""
+        return {
+            'name': self.name,
+            'website_url': self.website_url,
+            'project_data': self.project_data or {},
+            'user_email': user_email
+        }
+
+class UpdateProjectDataDto(BaseDto):
+    """DTO for updating project data."""
+    project_data: Dict[str, Any]
+
 # New DTOs for concurrency features
 
 class ConversationDto(BaseDto):
     id: str
     name: str
     user_email: str
+    project_id: Optional[str] = None
     shared_state: Optional[Dict[str, Any]] = None
     threads: Optional[Dict[str, Any]] = None
     settings: Optional[List[Dict[str, Any]]] = None
@@ -91,13 +122,16 @@ class ConversationDto(BaseDto):
         return ConversationDto(
             id=model.id,
             name=model.name,
+            user_email=model.user_email,
+            project_id=model.project_id,
             created_at=model.created_at,
             updated_at=model.updated_at,
             participants=participants or [],
             messages=messages or [],
             shared_state=model.shared_state,
             threads=model.threads,
-            settings=model.settings
+            settings=model.settings,
+            is_pinned=model.is_pinned
         )
     
     @staticmethod
@@ -111,10 +145,17 @@ class ConversationDto(BaseDto):
 
 class CreateConversationDto(BaseDto):
     name: str
+    project_id: Optional[str] = None
     
-    def to_db_dict(self):
+    def to_db_dict(self, user_email: str):
         """Convert to dict suitable for creating a Conversation model."""
-        return {'name': self.name}
+        result = {
+            'name': self.name,
+            'user_email': user_email
+        }
+        if self.project_id:
+            result['project_id'] = self.project_id
+        return result
 
 class MessageDto(BaseDto):
     conversation_id: str
