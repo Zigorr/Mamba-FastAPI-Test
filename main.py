@@ -12,24 +12,25 @@ from fastapi import FastAPI, Depends, HTTPException, status, Query, Request, Res
 from fastapi.responses import HTMLResponse # type: ignore
 from fastapi.middleware.cors import CORSMiddleware # type: ignore
 import logging
-from typing import Dict
+from typing import Dict, Any # Ensure Any is imported
 import certifi # Ensure certifi is imported before use
 from sqlalchemy.orm import Session # type: ignore
 from passlib.context import CryptContext # type: ignore
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from reset_database import reset_database
 from reset_pins import reset_all_pins
 
 # State and Auth
 import auth
-from auth import get_current_user, create_access_token, get_token_header
-from services.user_services import register_user, login_user, rename_conversation, delete_conversation, get_conversation_details, get_user_conversations, toggle_conversation_pin
+from auth import get_current_user, create_access_token, get_token_header, verify_google_id_token
+from services.user_services import register_user, login_user, rename_conversation, delete_conversation, get_conversation_details, get_user_conversations, toggle_conversation_pin, get_or_create_google_user
 from dto import (
     CreateUserDto, UserDto, LoginDto, 
     ConversationDto, CreateConversationDto,
     MessageDto, SendMessageDto, ConversationStateDto,
     UpdateConversationStateDto, RenameConversationDto
 )
+from pydantic import BaseModel # Add this import
 
 # Database and Models
 from database import (
@@ -120,6 +121,9 @@ Base.metadata.create_all(bind=engine)
 async def read_root():
      return {"message": "Welcome to Mamba FastAPI Server"}
 
+class GoogleLoginRequest(BaseModel):
+    token: str # This will be the Google ID token from the frontend
+
 @app.post("/register", response_model=UserDto, tags=["Authentication"])
 async def register_user_endpoint(user_data: CreateUserDto, db: Session = Depends(get_db)):
     """Register a new user."""
@@ -129,6 +133,26 @@ async def register_user_endpoint(user_data: CreateUserDto, db: Session = Depends
 async def login_for_access_token(login_data: LoginDto, db=Depends(get_db)):
     """Login a user and return an access token."""
     return await login_user(login_data, db)
+
+@app.post("/subscribe", tags=["User"])
+async def subscribe_user_endpoint(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Allows an authenticated user to 'subscribe'."""
+
+    if current_user.email.endswith("@mamba.agency"):
+        # Mamba agency users already have unlimited access
+        return {"message": "Mamba agency users have unlimited access by default."}
+
+    if current_user.is_subscribed:
+        return {"message": "You are already subscribed and have unlimited tokens."}
+
+    current_user.is_subscribed = True
+    current_user.token_limit = None  # Unlimited tokens upon subscription
+    db.add(current_user)
+    db.commit()
+    db.refresh(current_user)
+
+    # Placeholder for actual subscription benefits/UI update
+    return {"message": "Thanks for the support! Follow development to see the updates! You now have unlimited tokens."}
 
 @app.post("/chat", tags=["Chat"])
 async def create_chat(
@@ -186,11 +210,37 @@ async def chat_endpoint(
     try:
         current_user = await get_current_user(token=token, db=db)
         logger.info(f"User {current_user.email} authenticated")
+
+        # Token Management Logic
+        is_mamba_user = current_user.email.endswith("@mamba.agency")
+        is_subscribed_user = current_user.is_subscribed
+        can_have_unlimited_tokens = is_mamba_user or is_subscribed_user
+
+        if not can_have_unlimited_tokens:
+            now = datetime.now(timezone.utc)
+            needs_token_reset = False
+            if current_user.tokens_last_reset_at is None:
+                needs_token_reset = True
+            elif now - current_user.tokens_last_reset_at > timedelta(hours=24):
+                needs_token_reset = True
+
+            if needs_token_reset:
+                current_user.token_limit = settings.DEFAULT_FREE_USER_TOKEN_LIMIT
+                current_user.tokens_last_reset_at = now
+                db.add(current_user)
+                db.commit()
+                db.refresh(current_user)
+            
+            if current_user.token_limit is None or current_user.token_limit <= 0:
+                logger.warning(f"User {current_user.email} token limit {current_user.token_limit} insufficient.")
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Token limit reached. Please subscribe for unlimited access or wait 24 hours for tokens to reset."
+                )
+        # End of Token Management Logic
+
     except HTTPException as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Authentication failed: {e.detail}"
-        )
+        raise e
 
     # Get message from request
     message = request.get("message")
@@ -233,7 +283,15 @@ async def chat_endpoint(
         # Get completion from agency
         agency_response = agency.get_completion(message=message)
         
-        
+        # Decrement token for free users if operation was successful
+        if not can_have_unlimited_tokens:
+            if current_user.token_limit is not None and current_user.token_limit > 0:
+                current_user.token_limit -= 1 # Assuming 1 token per message
+                db.add(current_user)
+                db.commit()
+            # else: log or handle case where token_limit became <=0 unexpectedly after check? 
+            # For now, the check before agency.get_completion should prevent this.
+
         # Save AI response to database
         ai_message_dto = SendMessageDto(
             conversation_id=conversation_id,
@@ -426,11 +484,35 @@ async def submit_form(
     try:
         current_user = await get_current_user(token=token, db=db)
         logger.info(f"User {current_user.email} authenticated")
+
+        # Token Management Logic (for submit_form)
+        is_mamba_user = current_user.email.endswith("@mamba.agency")
+        is_subscribed_user = current_user.is_subscribed
+        can_have_unlimited_tokens = is_mamba_user or is_subscribed_user 
+
+        if not can_have_unlimited_tokens: 
+            now = datetime.now(timezone.utc)
+            needs_token_reset = False
+            if current_user.tokens_last_reset_at is None or \
+               (now - current_user.tokens_last_reset_at > timedelta(hours=24)):
+                needs_token_reset = True
+
+            if needs_token_reset:
+                current_user.token_limit = settings.DEFAULT_FREE_USER_TOKEN_LIMIT
+                current_user.tokens_last_reset_at = now
+                db.add(current_user)
+                db.commit()
+                db.refresh(current_user)
+            
+            if current_user.token_limit is None or current_user.token_limit <= 0:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Token limit reached. Please subscribe or wait for tokens to reset."
+                )
+        # End of Token Management Logic
+
     except HTTPException as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Authentication failed: {e.detail}"
-        )
+        raise e
 
     # Get message from request
     form_data = request.get("form_data")
@@ -482,6 +564,13 @@ async def submit_form(
         # Get completion from agency
         agency_response = agency.get_completion(message=message)
         
+        # Decrement token for free users if operation was successful
+        if not can_have_unlimited_tokens: 
+            if current_user.token_limit is not None and current_user.token_limit > 0:
+                current_user.token_limit -= 1 
+                db.add(current_user)
+                db.commit()
+
         # Save updated state
         conversation_repo.save_shared_state(conversation_id, agency.shared_state.data)
         
@@ -647,6 +736,36 @@ async def toggle_pin_endpoint(
 
     # Call the service function
     return await toggle_conversation_pin(conversation_id, current_user.email, db)
+
+@app.post("/auth/google", tags=["Authentication"])
+async def google_auth_endpoint(request: GoogleLoginRequest, db: Session = Depends(get_db)):
+    """Handles Google Sign-In/Sign-Up."""
+    google_token = request.token
+    try:
+        idinfo = await verify_google_id_token(google_token, settings.GOOGLE_CLIENT_ID)
+        if not idinfo or "email" not in idinfo:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Google token")
+
+        email = idinfo["email"]
+        first_name = idinfo.get("given_name", "")
+        last_name = idinfo.get("family_name", "")
+
+        auth_response = await get_or_create_google_user(
+            email=email,
+            first_name=first_name,
+            last_name=last_name,
+            db=db
+        )
+        return auth_response
+
+    except ValueError as e: # Specific exception from google-auth library for invalid token
+        logger.error(f"Google token verification failed: {e}")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Invalid Google token: {e}")
+    except HTTPException as e:
+        raise e # Re-raise existing HTTPExceptions
+    except Exception as e:
+        logger.error(f"Error during Google authentication for token {google_token[:20]}...: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Google authentication failed.")
 
 if __name__ == "__main__":
     print("Starting FastAPI server...")

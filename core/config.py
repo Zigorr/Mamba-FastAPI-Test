@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     # OpenAI (if needed directly from settings)
     OPENAI_API_KEY: Optional[str] = None 
 
+    # ZeroBounce API Key
+    ZEROBOUNCE_API_KEY: Optional[str] = None
+
     # Add other environment variables here as needed
     SSL_CERT_FILE: Optional[str] = None # For certifi.where()
 
