@@ -11,6 +11,7 @@ from pydantic import BaseModel
 import json
 import random
 import string
+from zerobouncesdk import ZeroBounce, ZBException
 
 from database import get_db, get_valkey_connection
 from models import User
@@ -32,25 +33,45 @@ USER_CONVERSATIONS_CACHE_TTL_SECONDS = 120
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
-def generate_verification_code(length: int = 5) -> str:
-    """Generates a random alphanumeric verification code."""
-    return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
-
 def register_user(user_data: CreateUserDto, db: Session) -> UserDto:
     """Register a new user."""
     user_repo = UserRepository(db)
     hashed_password = pwd_context.hash(user_data.password)
     
-    # TODO: Implement ZeroBounce email validation here
-    # Example:
-    # if not zerobounce_client.validate(user_data.email):
-    #     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid email address")
+    # ZeroBounce Email Validation
+    if settings.ZEROBOUNCE_API_KEY:
+        try:
+            zero_bounce = ZeroBounce(settings.ZEROBOUNCE_API_KEY)
+            validation_response = zero_bounce.validate(user_data.email)
+            if validation_response.status != "valid":
+                logger.warning(f"ZeroBounce validation failed for {user_data.email}: Status - {validation_response.status}, SubStatus - {validation_response.sub_status}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Email address is not valid. Status: {validation_response.status}"
+                )
+            logger.info(f"ZeroBounce validation successful for {user_data.email}")
+        except ZBException as e:
+            logger.error(f"ZeroBounce API error for {user_data.email}: {e}")
+            # Depending on policy, you might want to allow registration or deny it.
+            # For now, let's raise an error to indicate the validation service failed.
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Email validation service is temporarily unavailable. Please try again later."
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error during ZeroBounce validation for {user_data.email}: {e}")
+            # Fallback or raise error
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="An unexpected error occurred during email validation."
+            )
+    else:
+        logger.warning("ZEROBOUNCE_API_KEY not configured. Skipping email validation.")
 
     token_limit = None
     if not user_data.email.endswith("@mamba.agency"):
         token_limit = 800
 
-    verification_code = generate_verification_code()
     is_mamba_user = user_data.email.endswith("@mamba.agency")
 
     try:
@@ -63,18 +84,13 @@ def register_user(user_data: CreateUserDto, db: Session) -> UserDto:
             role="user", # Default role
             token_limit=None if is_mamba_user else settings.DEFAULT_FREE_USER_TOKEN_LIMIT,
             is_subscribed=False, # Default to not subscribed
-            email_verified=False, # Default to not verified
-            email_verification_code=verification_code,
+            email_verified=True, # Set to True by default as we are removing verification
             tokens_last_reset_at=datetime.now(timezone.utc) if not is_mamba_user else None
         )
         
         db.add(user)
         db.commit()
         db.refresh(user)
-
-        # TODO: Implement email sending for verification code here
-        # Example:
-        # email_service.send_verification_email(user.email, verification_code)
 
         return UserDto(
             email=user.email,
@@ -247,7 +263,6 @@ async def get_or_create_google_user(email: str, first_name: str, last_name: str,
             token_limit=token_limit,
             is_subscribed=False,
             email_verified=True, 
-            email_verification_code=None,
             tokens_last_reset_at=datetime.now(timezone.utc) if not is_mamba_user_via_google else None
         )
         try:

@@ -18,3 +18,4 @@ certifi>=2024.2.2
 redis>=4.2.0
 alembic>=1.13.1
 cachetools>=4.0.0,<6.0.0
+zerobouncesdk

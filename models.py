@@ -14,8 +14,6 @@ class User(Base):
     role = Column(String, default="user", nullable=False)
     token_limit = Column(Integer, nullable=True)  # Can be null for unlimited
     is_subscribed = Column(Boolean, default=False, nullable=False)
-    email_verified = Column(Boolean, default=False, nullable=False)
-    email_verification_code = Column(String, nullable=True) # For 5-digit code
     tokens_last_reset_at = Column(DateTime(timezone=True), nullable=True) # Tracks when tokens were last reset
     # Relationships
     conversations = relationship("Conversation", back_populates="user", cascade="all, delete-orphan")

@@ -121,10 +121,6 @@ Base.metadata.create_all(bind=engine)
 async def read_root():
      return {"message": "Welcome to Mamba FastAPI Server"}
 
-class EmailVerificationRequest(BaseModel):
-    email: str
-    code: str
-
 class GoogleLoginRequest(BaseModel):
     token: str # This will be the Google ID token from the frontend
 
@@ -138,46 +134,9 @@ async def login_for_access_token(login_data: LoginDto, db=Depends(get_db)):
     """Login a user and return an access token."""
     return await login_user(login_data, db)
 
-@app.post("/verify-email", tags=["Authentication"])
-async def verify_email_endpoint(verification_data: EmailVerificationRequest, db: Session = Depends(get_db)):
-    """Verify user's email with a 5-digit code."""
-    user_repo = UserRepository(db)
-    user = user_repo.get_by_email(verification_data.email)
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-
-    if user.email_verified:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already verified"
-        )
-
-    if user.email_verification_code != verification_data.code:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid verification code"
-        )
-
-    user.email_verified = True
-    user.email_verification_code = None # Clear the code after successful verification
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-
-    return {"message": "Email verified successfully"}
-
 @app.post("/subscribe", tags=["User"])
 async def subscribe_user_endpoint(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Allows an authenticated and email-verified user to 'subscribe'."""
-    if not current_user.email_verified:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Please verify your email before subscribing."
-        )
+    """Allows an authenticated user to 'subscribe'."""
 
     if current_user.email.endswith("@mamba.agency"):
         # Mamba agency users already have unlimited access
@@ -253,12 +212,6 @@ async def chat_endpoint(
         logger.info(f"User {current_user.email} authenticated")
 
         # Token Management Logic
-        if not current_user.email_verified:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Please verify your email to use the chat."
-            )
-
         is_mamba_user = current_user.email.endswith("@mamba.agency")
         is_subscribed_user = current_user.is_subscribed
         can_have_unlimited_tokens = is_mamba_user or is_subscribed_user
@@ -533,12 +486,6 @@ async def submit_form(
         logger.info(f"User {current_user.email} authenticated")
 
         # Token Management Logic (for submit_form)
-        if not current_user.email_verified:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Please verify your email to submit forms."
-            )
-
         is_mamba_user = current_user.email.endswith("@mamba.agency")
         is_subscribed_user = current_user.is_subscribed
         can_have_unlimited_tokens = is_mamba_user or is_subscribed_user 
