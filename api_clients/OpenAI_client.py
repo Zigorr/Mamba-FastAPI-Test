@@ -32,16 +32,21 @@ class OpenAIClient:
     
     @staticmethod
     def _get_structured_completion(tools, choice, system_prompt, content_prompt):
-        response = OpenAIClient._client.chat.completions.create(
-            model="gpt-4",
-            messages=[
+        try:
+            response = OpenAIClient._client.chat.completions.create(
+                model="gpt-4",
+                messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": content_prompt}
             ],
             tools=tools,
             tool_choice={"type": "function", "function": {"name": choice}}
-        )
-        return json.loads(response.choices[0].message.tool_calls[0].function.arguments)
+            )
+            print(response.choices[0].message.tool_calls[0].function.arguments)
+            return json.loads(response.choices[0].message.tool_calls[0].function.arguments)
+        except Exception as e:
+            logger.error(f"Error getting structured completion: {e}")
+            raise e;
     
     @staticmethod
     def extract_company_data(crawled_data):
@@ -72,7 +77,7 @@ class OpenAIClient:
         class ComprehensiveExtractInput(BaseModel):
             company_summary: str = Field(..., description="A concise summary of the company based on crawled data")
             products: List[Product] = Field(..., description="List of products or services offered by the company")
-            target_personas: List[TargetPersona] = Field(..., description="List of target personas for the company's products/services")
+            personas: List[TargetPersona] = Field(..., description="List of target personas for the company's products/services")
             competitors: List[Competitor] = Field(..., description="List of competitors to the company")
             
         tools = [
@@ -85,10 +90,14 @@ class OpenAIClient:
         
         # Prepare crawled data for prompt
         pages_data = []
-        for page in crawled_data:
-            # Limit markdown content to reduce token usage
-            content_preview = page["markdown"][:3000] + "..." if len(page["markdown"]) > 3000 else page["markdown"]
-            pages_data.append(f"URL: {page['url']}\nContent: {content_preview}")
+        try :
+            for page in crawled_data:
+                # Limit markdown content to reduce token usage
+                content_preview = page["markdown"][:3000] + "..." if len(page["markdown"]) > 3000 else page["markdown"]
+                pages_data.append(f"URL: {page['url']}\nContent: {content_preview}")
+        except Exception as e:
+            logger.error(f"Error extracting company data: {e}")
+            raise e;
         
         all_pages = "\n\n---\n\n".join(pages_data)
         
@@ -163,7 +172,7 @@ class OpenAIClient:
         class ComprehensiveExtractInput(BaseModel):
             company_summary: str = Field(..., description="A concise summary of the company based on provided information")
             products: List[Product] = Field(..., description="List of products or services offered by the company")
-            target_personas: List[TargetPersona] = Field(..., description="List of target personas for the company's products/services")
+            personas: List[TargetPersona] = Field(..., description="List of target personas for the company's products/services")
             competitors: List[Competitor] = Field(..., description="List of competitors to the company")
             
         tools = [

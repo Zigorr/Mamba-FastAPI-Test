@@ -137,6 +137,13 @@ class ProjectRepository(BaseRepository[Project]):
         self.db.refresh(project)
         return project
 
+    def get_by_name_and_user(self, name: str, user_email: str) -> Optional[Project]:
+        """Get project by name and user email."""
+        return self.db.query(Project).filter(
+            Project.name == name,
+            Project.user_email == user_email
+        ).first()
+    
     def get_by_user_email(self, user_email: str) -> List[Project]:
         """Get all projects for a specific user."""
         return self.db.query(Project).filter(Project.user_email == user_email).all()

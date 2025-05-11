@@ -247,7 +247,14 @@ async def create_project_data(
         # URL-based format
         project_url = request.get("project_url")
         logger.info(f"Processing URL-based project data extraction: {project_url}")
-        return extract_project_data(project_url)
+        try:
+            return extract_project_data(project_url)
+        except Exception as e:
+            logger.error(f"Error extracting project data: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error extracting project data: {e}"
+            );
     elif all(k in request for k in ["project_name", "products_description", "personas_description", "competitors_description"]):
         # Direct description-based format
         project_name = request.get("project_name")
@@ -256,12 +263,19 @@ async def create_project_data(
         competitors_description = request.get("competitors_description")
         
         logger.info(f"Processing description-based project data generation for: {project_name}")
-        return generate_project_data(
-            project_name=project_name,
-            products_description=products_description,
-            personas_description=personas_description,
-            competitors_description=competitors_description
-        )
+        try:
+            return generate_project_data(
+                project_name=project_name,
+                products_description=products_description,
+                personas_description=personas_description,
+                competitors_description=competitors_description
+            )
+        except Exception as e:
+            logger.error(f"Error generating project data: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error generating project data: {e}"
+            );
     else:
         # Neither format provided correctly
         raise HTTPException(
