@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 import logging
 import openai
 import os
+
 load_dotenv(override=True)
 
 logger = logging.getLogger(__name__)
@@ -106,6 +107,6 @@ if __name__ == "__main__":
     import certifi
     import os
     os.environ["SSL_CERT_FILE"] = certifi.where()
-    summary = "Logitech is a global leader in personal computer and mobile accessories, known for its innovative products in gaming, streaming, and audio. The company offers a wide range of products including gaming mice, keyboards, headsets, and simulation equipment, designed to enhance user experience and performance."
+    summary = "Logitech G is a leading brand in gaming gear, offering a wide range of products including gaming mice, keyboards, headsets, and racing wheels designed for both casual and professional gamers. Their products are known for advanced technology, precision, and performance, catering to the needs of gamers worldwide."
     response = OpenAIClient.get_personas_competitors(summary)
-    json.dump(response, open("extract.json", "w"), indent=4)
+    json.dump(response, open("extracted_personas_competitors.json", "w"), indent=4)

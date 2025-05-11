@@ -6,6 +6,7 @@ from typing import Any, Optional, List
 from dotenv import load_dotenv
 import os
 import logging
+import pandas as pd
 
 load_dotenv(override=True)
 
@@ -58,9 +59,26 @@ class FireCrawlClient:
         prompt = """
         Scrape the company website for the following:
         - products: Each product must include its URL, locale language using ISO 639-1 codes (e.g., "en"), its official brand name, a *very short* description of the product, and a priority score from 1 to 10 measuring the product's importance to the company.
-        - company_summary: A concise summary of who this company is, what they do, what types of products/services they offer.
+        - company_summary: A concise but descriptive summary of who this company is, what they do, what types of products/services they offer.
         """
-        return FireCrawlClient._extract(url, prompt, ExtractSchema)
+        response = FireCrawlClient._extract(url, prompt, ExtractSchema)
+        df = pd.DataFrame(response['products'])
+
+        # Filter for "en" language using regex
+        df_filtered = df[df['language'].str.match(r'^en.*$')]
+        # Remove duplicates based on url
+        df_filtered = df_filtered.drop_duplicates(subset=['url'])
+        df_filtered = df_filtered[df_filtered['url'].str.match(r'^https.*$')]
+        # Sort by priority in descending order
+        df_filtered = df_filtered.sort_values('priority', ascending=False)
+        # Reset index
+        df_filtered = df_filtered.reset_index(drop=True)
+        # Handle Unicode characters by normalizing
+        df_filtered['name'] = df_filtered['name'].apply(lambda x: x.encode('ascii', 'ignore').decode('ascii'))
+        df_filtered['description'] = df_filtered['description'].apply(lambda x: x.encode('ascii', 'ignore').decode('ascii'))
+        response['products'] = df_filtered.to_dict('records')
+
+        return response
 
 if __name__ == "__main__":
 
