@@ -2,7 +2,6 @@ from agency_swarm import Agent
 from dotenv import load_dotenv
 
 # Import the specific tools
-from .tools.CollectBusinessInfoTool import CollectBusinessInfoTool
 from .tools.BoFuListTool import BoFuListTool
 from .tools.ToFuListTool import ToFuListTool
 from .tools.RetrieveClientContextTool import RetrieveClientContextTool
@@ -15,11 +14,10 @@ class SEOEngineer(Agent):
     def __init__(self):
         super().__init__(
             name="SEOEngineer",
-            description="Collects business information via a custom UI form, generates BoFu keywords, and displays them.",
+            description="Generates BoFu and ToFu/MoFu keywords based on project data.",
             instructions="./instructions.md", # Path to the instructions file
             # Explicitly list the tools the agent can use
             tools=[
-                CollectBusinessInfoTool,
                 BoFuListTool,
                 ToFuListTool,
                 RetrieveClientContextTool
