@@ -44,6 +44,7 @@ from database import (
 from models import Base, User
 from repositories import ConversationRepository, MessageRepository, UserRepository, ProjectRepository
 from services.agency_services import AgencyService
+from services.project_services import extract_project_data
 # from utils.valkey_utils import publish_message_to_valkey
 import json
 
@@ -158,6 +159,25 @@ async def subscribe_user_endpoint(db: Session = Depends(get_db), current_user: U
 
     # Placeholder for actual subscription benefits/UI update
     return {"message": "Thanks for the support! Follow development to see the updates! You now have unlimited tokens."}
+
+
+@app.post("/project-data", tags=["Projects"])
+async def create_project_data(
+    project_url: str,
+    token: str = Depends(get_token_header),
+    db: Session = Depends(get_db)
+):
+    """Create project data for a project."""
+    try:
+        current_user = await get_current_user(token=token, db=db)
+        logger.info(f"User {current_user.email} authenticated for project data extraction")
+    except HTTPException as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Authentication failed: {e.detail}"
+        )
+    
+    return extract_project_data(project_url)
 
 @app.post("/projects", response_model=ProjectDto, tags=["Projects"])
 async def create_project(
