@@ -63,36 +63,9 @@ elif certifi.where(): # Default to certifi.where() if not in settings
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Correlation ID Middleware
-@app.middleware("http")
-async def correlation_id_middleware(request: Request, call_next):
-    # Check for incoming header, otherwise generate a new one
-    correlation_id = request.headers.get("X-Correlation-ID")
-    if not correlation_id:
-        correlation_id = str(uuid.uuid4())
-    
-    # Store it in request.state to make it accessible in path operations
-    request.state.correlation_id = correlation_id
-    
-    # Call the next middleware or path operation
-    response = await call_next(request)
-    
-    # Add it to the response headers
-    response.headers["X-Correlation-ID"] = correlation_id
-    
-    return response
-
-# Cache TTLs
-MESSAGES_CACHE_TTL_SECONDS = 60  # 1 minute
-# CONVERSATION_DETAILS_CACHE_TTL_SECONDS = 300 # Defined in user_services.py
-# USER_CONVERSATIONS_CACHE_TTL_SECONDS = 120 # Defined in user_services.py
-
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 # Lifespan manager for startup and shutdown events
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app_instance: FastAPI): # Changed 'app' to 'app_instance' to avoid conflict if app is defined globally later
     # Startup logic
     logger.info("Application startup (lifespan)... Genta was here")
     logger.info("Creating Valkey/Redis connection pool (lifespan)... Genta was here")
@@ -142,14 +115,32 @@ app = FastAPI(
     lifespan=lifespan # Add the lifespan manager here
 )
 
-# Configure CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173","http://localhost:8000", "http://178.128.90.137", "https://front-genta.xyz", "http://front-genta.xyz"],  # Or restrict to your frontend URL like ["https://yourfrontend.com"]
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Correlation ID Middleware
+@app.middleware("http")
+async def correlation_id_middleware(request: Request, call_next):
+    # Check for incoming header, otherwise generate a new one
+    correlation_id = request.headers.get("X-Correlation-ID")
+    if not correlation_id:
+        correlation_id = str(uuid.uuid4())
+    
+    # Store it in request.state to make it accessible in path operations
+    request.state.correlation_id = correlation_id
+    
+    # Call the next middleware or path operation
+    response = await call_next(request)
+    
+    # Add it to the response headers
+    response.headers["X-Correlation-ID"] = correlation_id
+    
+    return response
+
+# Cache TTLs
+MESSAGES_CACHE_TTL_SECONDS = 60  # 1 minute
+# CONVERSATION_DETAILS_CACHE_TTL_SECONDS = 300 # Defined in user_services.py
+# USER_CONVERSATIONS_CACHE_TTL_SECONDS = 120 # Defined in user_services.py
+
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
