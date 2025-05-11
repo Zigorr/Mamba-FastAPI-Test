@@ -1114,7 +1114,7 @@ async def get_conversations_for_project(
     
     return {"conversations": result}
 
-@app.get("/api/google/oauth/authorize", tags=["Google OAuth"], response_class=RedirectResponse)
+@app.get("/api/google/oauth/authorize", tags=["Google OAuth"])
 async def google_oauth_authorize(
     product: str, # "search_console" or "ga4"
     request: Request, 
@@ -1124,7 +1124,7 @@ async def google_oauth_authorize(
 ):
     """
     Initiates the Google OAuth2 flow for the specified product.
-    Redirects the user to Google's consent screen.
+    Returns the Google authorization URL for the frontend to redirect to.
     """
     try:
         current_user: UserModel = await get_current_user(token=token, db=db)
@@ -1141,12 +1141,16 @@ async def google_oauth_authorize(
 
     oauth_service = GoogleOAuthService(db=db)
     try:
+        # Use the redirect URI from settings
         authorization_url = await oauth_service.build_authorization_url(
             user_email=current_user.email,
             service_name=service_name_enum,
             valkey_conn=valkey_conn
         )
-        return RedirectResponse(url=authorization_url)
+        
+        # Return the URL instead of redirecting
+        return {"authUrl": authorization_url}
+        
     except ValueError as e: 
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
@@ -1187,6 +1191,62 @@ async def google_oauth_callback(
         error_params = urlencode({"google_auth_status": "error", "detail": "An internal error occurred during Google authentication."})
         redirect_url = f"{settings.FRONTEND_URL.rstrip('/')}/settings?{error_params}"
         return RedirectResponse(url=redirect_url)
+
+
+# The GoogleOAuthService needs to be updated to handle the redirect_uri parameter
+# Here's how the build_authorization_url method might need to be modified:
+
+# Example modification for your GoogleOAuthService class (adjust to match your actual implementation)
+async def build_authorization_url(
+    self,
+    user_email: str,
+    service_name: GoogleServiceModel,
+    redirect_uri: str,  # Add this parameter
+    valkey_conn
+) -> str:
+    """
+    Builds the Google OAuth authorization URL.
+    
+    Args:
+        user_email: The email of the user initiating the OAuth flow
+        service_name: The Google service being authorized
+        redirect_uri: The callback URL after authorization
+        valkey_conn: Connection to the key-value store
+        
+    Returns:
+        The authorization URL
+    """
+    # Your existing code...
+    
+    # Use the provided redirect_uri instead of a hardcoded one
+    oauth_flow = flow.Flow.from_client_secrets_file(
+        settings.GOOGLE_CLIENT_SECRETS_FILE,
+        scopes=self._get_scopes_for_service(service_name),
+        redirect_uri=redirect_uri  # Use the passed redirect_uri
+    )
+    
+    # Generate state token and store it
+    state_token = secrets.token_urlsafe(32)
+    
+    # Store state token with user information
+    state_data = {
+        "user_email": user_email,
+        "service_name": service_name.value,
+        "created_at": datetime.utcnow().isoformat()
+    }
+    
+    # Store in your key-value store
+    await valkey_conn.set(f"oauth_state:{state_token}", json.dumps(state_data), ex=1800)  # 30 minute expiry
+    
+    # Get authorization URL with state
+    authorization_url, _ = oauth_flow.authorization_url(
+        access_type='offline',
+        include_granted_scopes='true',
+        prompt='consent',
+        state=state_token
+    )
+    
+    return authorization_url
 
 @app.post("/api/google/oauth/revoke", tags=["Google OAuth"], status_code=status.HTTP_204_NO_CONTENT)
 async def google_oauth_revoke(
