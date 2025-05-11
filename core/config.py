@@ -29,6 +29,18 @@ class Settings(BaseSettings):
     # Google OAuth Client ID
     GOOGLE_CLIENT_ID: Optional[str] = None
 
+    # Google OAuth Client Secret
+    GOOGLE_CLIENT_SECRET: Optional[str] = None
+
+    # Application Base URL (e.g., http://localhost:8000 or https://yourdomain.com)
+    APP_BASE_URL: str = "http://localhost:8000" 
+
+    # Google OAuth Callback Path (e.g., /oauth2callback)
+    GOOGLE_OAUTH_CALLBACK_PATH: str = "/oauth2callback"
+
+    # Frontend URL for redirects
+    FRONTEND_URL: str = "http://localhost:5173" # Default for local dev, override in .env for prod
+
     # Default token limit for free users
     DEFAULT_FREE_USER_TOKEN_LIMIT: int = 800
 
