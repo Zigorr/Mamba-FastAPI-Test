@@ -11,7 +11,7 @@ from pydantic import BaseModel
 import json
 import random
 import string
-from zerobouncesdk import ZeroBounce, ZBException
+from zerobouncesdk import ZeroBounce, ZBException, ZBValidateStatus
 
 from database import get_db, get_valkey_connection
 from models import User
@@ -43,14 +43,14 @@ def register_user(user_data: CreateUserDto, db: Session) -> UserDto:
         try:
             zero_bounce = ZeroBounce(settings.ZEROBOUNCE_API_KEY)
             validation_response = zero_bounce.validate(user_data.email)
-            if validation_response.status != "valid":
+            if validation_response.status != ZBValidateStatus.valid:
                 logger.warning(f"ZeroBounce validation failed for {user_data.email}: Status - {validation_response.status}, SubStatus - {validation_response.sub_status}")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Email address is not valid. Status: {validation_response.status}"
                 )
                 
-            logger.info(f"ZeroBounce validation successful for {user_data.email}")
+            logger.info(f"ZeroBounce validation successful for {user_data.email}, Status: {validation_response.status}, SubStatus: {validation_response.sub_status}")
         except HTTPException: # Re-raise the HTTPException from the validation status check
             raise
         except ZBException as e:
