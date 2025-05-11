@@ -87,7 +87,7 @@ class OpenAIClient:
         pages_data = []
         for page in crawled_data:
             # Limit markdown content to reduce token usage
-            content_preview = page["markdown"][:1500] + "..." if len(page["markdown"]) > 1500 else page["markdown"]
+            content_preview = page["markdown"][:3000] + "..." if len(page["markdown"]) > 3000 else page["markdown"]
             pages_data.append(f"URL: {page['url']}\nContent: {content_preview}")
         
         all_pages = "\n\n---\n\n".join(pages_data)
