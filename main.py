@@ -117,6 +117,30 @@ app = FastAPI(
     lifespan=lifespan # Add the lifespan manager here
 )
 
+# --- CORS Middleware --- 
+# Ensure this is placed before any routers if you have them, 
+# and generally early in the middleware stack.
+origins = [
+    settings.FRONTEND_URL,  # From your .env file via core/config.py
+    "https://front-genta.xyz", # The specific frontend URL you provided
+    # You can add other origins if needed, e.g., for local development if different
+    # "http://localhost:3000", 
+    # "http://127.0.0.1:3000",
+]
+
+# Add trailing slashes to origins if they don't have them, or ensure consistency
+# as some browsers/servers are picky.
+# For simplicity, FastAPI/Starlette are generally flexible.
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True, # Important for cookies, authorization headers
+    allow_methods=["*"],    # Allows all standard methods
+    allow_headers=["*"],    # Allows all headers
+)
+# --- End CORS Middleware ---
+
 # Correlation ID Middleware
 @app.middleware("http")
 async def correlation_id_middleware(request: Request, call_next):
