@@ -4,16 +4,7 @@ from repositories import ProjectRepository
 
 def extract_project_data(project_url: str):
     # Get the company summary
-    company_data = FireCrawlClient.extract_products_from_website(project_url)
+    crawled_data = FireCrawlClient._crawl(project_url)
+    company_data = OpenAIClient.extract_all_from_crawl(crawled_data)
 
-    # Get the target personas and competitors
-    personas_competitors = OpenAIClient.get_personas_competitors(company_data['company_summary'])
-
-    # Get the products
-    project_data = {
-        'products': company_data['products'],
-        'company_summary': company_data['company_summary'],
-        'personas': personas_competitors['target_personas'],
-        'competitors': personas_competitors['competitors']
-    }
-    return project_data
+    return company_data

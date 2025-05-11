@@ -1,5 +1,5 @@
 # Install with pip install firecrawl-py
-from firecrawl import FirecrawlApp
+from firecrawl import FirecrawlApp, ScrapeOptions
 from pydantic import BaseModel, Field
 from typing import Any, Optional, List
 
@@ -24,6 +24,24 @@ class FireCrawlClient:
 
     _app = FirecrawlApp(api_key=os.getenv("FIRECRAWL_API_KEY"))
 
+    @staticmethod
+    def _crawl(url: str) -> str:
+        data = FireCrawlClient._app.crawl_url(
+            url, 
+            limit=10, 
+            scrape_options=ScrapeOptions(formats=['markdown']),
+        )
+        if data.success:
+            results = []
+            for document in data.data:
+                item = {}
+                item['url'] = document.metadata['url']
+                item['markdown'] = document.markdown
+                results.append(item)
+            return results
+        else:
+            raise Exception(data.error)
+    
     @staticmethod
     def _extract(url: str, prompt: str, schema: BaseModel) -> str: 
         data = FireCrawlClient._app.extract(
@@ -85,7 +103,8 @@ if __name__ == "__main__":
     import json
     site_url = "https://www.logitechg.com"
     url = "https://www.logitechg.com/en-nz/products/gaming-mice/g402-hyperion-fury-fps-gaming-mouse.910-004070.html"
-    response = FireCrawlClient.extract_products_from_website(site_url)
+    #response = FireCrawlClient.extract_products_from_website(site_url)
+    response = FireCrawlClient._crawl(site_url)
     print(response)
-    json.dump(response, open("extracted_products.json", "w"), indent=4)
+    json.dump(response, open("crawled_data.json", "w"), indent=4)
 
