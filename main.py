@@ -983,26 +983,19 @@ async def get_conversations_for_project(
     
     # Get conversations for project
     conversation_repo = ConversationRepository(db)
-    message_repo = MessageRepository(db)
-    
     conversations = conversation_repo.get_for_project(
         project_id=project_id,
         limit=limit,
         offset=offset
     )
-    result = []
     
-    # For each conversation, get the latest message
-    for conversation in conversations:
-        conv_dto = conversation_repo.to_dto(conversation)
-        latest_messages = message_repo.get_for_conversation(conversation.id, limit=1, offset=0)
-        
-        # Add latest message preview if available
-        if latest_messages:
-            latest_message = message_repo.to_dto(latest_messages[0])
-            conv_dto.latest_message = latest_message
-        
-        result.append(conv_dto)
+    # Return conversation name, ID, is_pinned, and updated_at
+    result = [{
+        "id": conv.id, 
+        "name": conv.name, 
+        "is_pinned": conv.is_pinned,
+        "updated_at": conv.updated_at.isoformat() if conv.updated_at else None
+    } for conv in conversations]
     
     return {"conversations": result}
 
