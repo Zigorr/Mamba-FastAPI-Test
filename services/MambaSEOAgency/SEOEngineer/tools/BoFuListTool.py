@@ -23,24 +23,29 @@ class BoFuListTool(BaseTool):
         """
         Main execution method for the BoFuListTool.
         """
-
-        data = self._shared_state.get('business_info_data')
+        project = self._shared_state.get('project')
+        project_data = project.get('project_data')
+        #data = self._shared_state.get('business_info_data')
 
         # Initialize keywords list for results
         keywords_list = []
 
         # Check if business data exists
-        if not data:
+        #if not data:
+        if not project:
             return "No business information found in shared state."
 
         # --- Determine Location and Language --- 
-        target_location = data.get('market_geo', 'United States')
+        #target_location = data.get('market_geo', 'United States')
+        target_location = project.get('market_geo', 'United States')
         target_language = DataForSEOClient.get_language_for_location(target_location)
         print(f"Using Location: '{target_location}', Language: '{target_language}' for API calls.")
         # --- End Determine Location and Language --- 
 
         # Get products/services Dictionary
-        products = data.get('products_services')
+        #products = data.get('products_services')
+        products = project_data.get('products')
+        target_personas = project_data.get('personas')
 
         # Check if it's a List and not empty
         if not isinstance(products, list):
@@ -57,7 +62,7 @@ class BoFuListTool(BaseTool):
         # Process each product (row in the DataFrame)
         for index, product in enumerate(products):
 
-            seeds = self._get_bofu_seeds(product)
+            seeds = self._get_bofu_seeds(product, target_personas)
 
             product_name = product.get('name', '')
             if not product_name:
@@ -124,17 +129,19 @@ class BoFuListTool(BaseTool):
         return f"Keywords table {table_id} has been saved to shared state."
 
 
-    def _get_bofu_seeds(self, product):
+    def _get_bofu_seeds(self, product, target_personas):
         """
         Internal method to get BoFu seeds for a product.
         Agent is not allowed to call this method directly.
         """
         product_name = product.get('name', '')
         product_description = product.get('description', '')
-        product_target_persona = product.get('target_persona')
+        #product_target_persona = product.get('target_persona')
+        project_target_personas = target_personas
+        personas_markdown = "\n".join([f"**{persona.get('name', '')}**: {persona.get('description', '')}" for persona in project_target_personas])
         #product_url = product.get('url', '')
-        product_url_summary = product.get('url_summary', '')
-
+        #product_url_summary = product.get('url_summary', '')
+        product_url_summary = None
         # if product_url:
         #     # Only try to get the summary if a URL exists
         #     try:
@@ -178,7 +185,7 @@ class BoFuListTool(BaseTool):
         --- PRODUCT INFO ---
         Product Name: {product_name}
         Product Description: {product_description}
-        Product Target Persona: {product_target_persona}
+        Product Target Personas: {personas_markdown}
         {f"Product URL Page Summary: {product_url_summary}" if product_url_summary else "(No URL summary available)"}
         ---
         """

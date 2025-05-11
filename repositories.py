@@ -366,6 +366,15 @@ class ConversationRepository(BaseRepository[Conversation]):
         self._update_project_timestamp(conversation_id)
         return self.get_by_id(conversation_id)
 
+    def get_project_by_conversation_id(self, conversation_id: str) -> Optional[Project]:
+        """Get the project associated with a conversation."""
+        conversation = self.get_by_id(conversation_id)
+        if not conversation or not conversation.project_id:
+            return None
+        
+        project_repo = ProjectRepository(self.db)
+        return project_repo.get_by_id(conversation.project_id)
+
 class MessageRepository(BaseRepository[Message]):
     """Repository for Message entity."""
     
