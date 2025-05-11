@@ -44,7 +44,7 @@ from database import (
 from models import Base, User
 from repositories import ConversationRepository, MessageRepository, UserRepository, ProjectRepository
 from services.agency_services import AgencyService
-from services.project_services import extract_project_data
+from services.project_services import extract_project_data, generate_project_data
 # from utils.valkey_utils import publish_message_to_valkey
 import json
 
@@ -167,7 +167,17 @@ async def create_project_data(
     token: str = Depends(get_token_header),
     db: Session = Depends(get_db)
 ):
-    """Create project data for a project."""
+    """Create project data for a project.
+    
+    This endpoint accepts two formats:
+    1. URL format: {"project_url": "https://example.com"}
+    2. Direct format: {
+        "project_name": "Company Name",
+        "products_description": "Description of products",
+        "personas_description": "Description of target personas",
+        "competitors_description": "Description of competitors"
+    }
+    """
     try:
         current_user = await get_current_user(token=token, db=db)
         logger.info(f"User {current_user.email} authenticated for project data extraction")
@@ -176,13 +186,33 @@ async def create_project_data(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Authentication failed: {e.detail}"
         )
-    if not request.get("project_url"):
+    
+    # Check which format is being provided
+    if request.get("project_url"):
+        # URL-based format
+        project_url = request.get("project_url")
+        logger.info(f"Processing URL-based project data extraction: {project_url}")
+        return extract_project_data(project_url)
+    elif all(k in request for k in ["project_name", "products_description", "personas_description", "competitors_description"]):
+        # Direct description-based format
+        project_name = request.get("project_name")
+        products_description = request.get("products_description")
+        personas_description = request.get("personas_description")
+        competitors_description = request.get("competitors_description")
+        
+        logger.info(f"Processing description-based project data generation for: {project_name}")
+        return generate_project_data(
+            project_name=project_name,
+            products_description=products_description,
+            personas_description=personas_description,
+            competitors_description=competitors_description
+        )
+    else:
+        # Neither format provided correctly
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Project URL is required"
+            detail="Either 'project_url' OR all of ('project_name', 'products_description', 'personas_description', 'competitors_description') must be provided"
         )
-    project_url = request.get("project_url")
-    return extract_project_data(project_url)
 
 @app.post("/projects", response_model=ProjectDto, tags=["Projects"])
 async def create_project(

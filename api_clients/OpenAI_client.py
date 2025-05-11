@@ -44,135 +44,7 @@ class OpenAIClient:
         return json.loads(response.choices[0].message.tool_calls[0].function.arguments)
     
     @staticmethod
-    def get_personas_competitors(company_summary: str):
-        class TargetPersona(BaseModel):
-            name: str = Field(..., description="A concise label for the target persona.")
-            description: str = Field(..., description="A very brief description of this target persona.")
-            priority: int = Field(..., description="A priority score from 1-10 measuring the target persona's importance to the company.")
-
-        class Competitor(BaseModel):
-            name: str = Field(..., description="The official brand name of the competing company.")
-            description: str = Field(..., description="A short description of the competitor and what they do.")
-
-        class ExtractTargetPersonasInput(BaseModel):
-            target_personas: List[TargetPersona]
-
-        class ExtractCompetitorsInput(BaseModel):
-            competitors: List[Competitor]
-
-        tools = [
-            OpenAIClient._create_tool(
-                name="extract_target_personas",
-                description="Extract target personas from company summary.",
-                model=ExtractTargetPersonasInput
-            ),
-            OpenAIClient._create_tool(
-                name="extract_competitors",
-                description="Extract a list of competitors from a company summary.",
-                model=ExtractCompetitorsInput
-            )
-        ]
-        personas_system_prompt = "You are an AI that extracts target persona data."
-        personas_prompt = f"""
-            From the given company summary: --- {company_summary} ---
-            Extract target persona data where:
-            - name is a concise label for the target persona.
-            - description is a very brief description of this target persona.
-            - priority is a priority score from 1-10 measuring the target persona's importance to our company.
-        """
-        competitors_system_prompt = "You are an AI that extracts competitor data."
-        competitors_prompt = f"""
-        From the given company summary: --- {company_summary} ---
-        Extract a list of competing companies where:
-        - name is the official brand name of the competing company.
-        - description is a short explanation of what they do and how they relate to our company.
-        """
-        response = {}
-        response["target_personas"] = OpenAIClient._get_structured_completion(
-            tools,
-            "extract_target_personas",
-            personas_system_prompt,
-            personas_prompt
-        )["target_personas"]
-        response["competitors"] = OpenAIClient._get_structured_completion(
-            tools,
-            "extract_competitors",
-            competitors_system_prompt,
-            competitors_prompt
-        )["competitors"]
-        return response
-    
-    @staticmethod
-    def get_products(crawled_data):
-        """
-        Extract products from crawled website data
-        
-        Args:
-            crawled_data: A list of crawled webpage data containing URL and markdown content
-            
-        Returns:
-            A dictionary containing a general company summary and a list of products
-        """
-        class Product(BaseModel):
-            url: str = Field(..., description="The URL of the product or service page")
-            name: str = Field(..., description="The official brand name of the product or service")
-            description: str = Field(..., description="A detailed, but concise description of the product or service")
-            priority: int = Field(..., description="A priority score from 1-10 (where 1 is lowest priority and 10 is highest)")
-
-        class ExtractProductsInput(BaseModel):
-            company_summary: str = Field(..., description="A concise summary of the company based on crawled data")
-            products: List[Product]
-            
-        tools = [
-            OpenAIClient._create_tool(
-                name="extract_products",
-                description="Extract products or services from crawled website data",
-                model=ExtractProductsInput
-            )
-        ]
-        
-        # Prepare crawled data for prompt
-        pages_data = []
-        for page in crawled_data:
-            # Limit markdown content to reduce token usage
-            content_preview = page["markdown"][:1500] + "..." if len(page["markdown"]) > 1500 else page["markdown"]
-            pages_data.append(f"URL: {page['url']}\nContent: {content_preview}")
-        
-        all_pages = "\n\n---\n\n".join(pages_data)
-        
-        system_prompt = "You are an AI that extracts product or service data from crawled website content."
-        content_prompt = f"""
-        From the given crawled website data, extract:
-        
-        1. A concise company summary explaining what the company does, its main products/services and target audience.
-        
-        2. Product or service information with the following attributes:
-        - url: The URL of the product or service page
-        - name: The official brand name of the product or service
-        - description: A detailed, but concise description of the product or service
-        - priority: A priority score from 1-10 (where 1 is lowest priority and 10 is highest)
-          
-        Only extract actual products (not categories or informational pages). 
-        Prioritize products based on:
-        - How prominently they appear in the data
-        - Whether they have detailed specification information
-        - Products with clear descriptions and pricing information
-        
-        Crawled Data:
-        {all_pages}
-        """
-        
-        response = OpenAIClient._get_structured_completion(
-            tools,
-            "extract_products",
-            system_prompt,
-            content_prompt
-        )
-        
-        return response
-        
-    @staticmethod
-    def extract_all_from_crawl(crawled_data):
+    def extract_company_data(crawled_data):
         """
         Extract products, company summary, target personas, and competitors all from crawled data in one operation
         
@@ -258,6 +130,99 @@ class OpenAIClient:
         )
         
         return response
+        
+    @staticmethod
+    def generate_company_data(products_description: str, personas_description: str, competitors_description: str, company_name: str):
+        """
+        Create structured data from user-provided descriptive strings
+        
+        Args:
+            products_description: A string description of the products/services
+            personas_description: A string description of the target personas/customers
+            competitors_description: A string description of the competitors
+            company_name: Name of the company to use in generating the company summary
+            
+        Returns:
+            A dictionary containing company summary, products, target personas, and competitors
+        """
+        class Product(BaseModel):
+            url: str = Field(..., description="The URL of the product or service page")
+            name: str = Field(..., description="The official brand name of the product or service")
+            description: str = Field(..., description="A detailed, but concise description of the product or service")
+            priority: int = Field(..., description="A priority score from 1-10 (where 1 is lowest priority and 10 is highest)")
+
+        class TargetPersona(BaseModel):
+            name: str = Field(..., description="A concise label for the target persona")
+            description: str = Field(..., description="A brief description of this target persona")
+            priority: int = Field(..., description="A priority score from 1-10 measuring the target persona's importance")
+
+        class Competitor(BaseModel):
+            name: str = Field(..., description="The official brand name of the competing company")
+            description: str = Field(..., description="A short description of what the competitor does")
+
+        class ComprehensiveExtractInput(BaseModel):
+            company_summary: str = Field(..., description="A concise summary of the company based on provided information")
+            products: List[Product] = Field(..., description="List of products or services offered by the company")
+            target_personas: List[TargetPersona] = Field(..., description="List of target personas for the company's products/services")
+            competitors: List[Competitor] = Field(..., description="List of competitors to the company")
+            
+        tools = [
+            OpenAIClient._create_tool(
+                name="create_structured_data",
+                description="Create structured business data from descriptive text",
+                model=ComprehensiveExtractInput
+            )
+        ]
+        
+        system_prompt = "You are an AI that creates structured business data from descriptive text provided by users."
+        content_prompt = f"""
+        Create structured data for a business based on the following descriptive information:
+        
+        COMPANY NAME:
+        {company_name}
+        
+        PRODUCTS DESCRIPTION:
+        {products_description}
+        
+        TARGET PERSONAS DESCRIPTION:
+        {personas_description}
+        
+        COMPETITORS DESCRIPTION:
+        {competitors_description}
+        
+        Convert this information into structured data with the following components:
+        
+        1. COMPANY SUMMARY:
+           Generate a concise but comprehensive summary explaining what {company_name} does, its main products/services, and target audience.
+           Use all the provided information to create this summary.
+        
+        2. PRODUCTS/SERVICES:
+           Create product or service entries with these attributes:
+           - url: leave this blank
+           - name: The official brand name of the product or service
+           - description: A detailed, but concise description of the product or service
+           - priority: A priority score from 1-10 (where 1 is lowest priority and 10 is highest)
+        
+        3. TARGET PERSONAS:
+           Create target persona entries with these attributes:
+           - name: A concise label for the target persona
+           - description: A brief description of this target persona
+           - priority: A priority score from 1-10 measuring how important this persona is to the company
+        
+        4. COMPETITORS:
+           Create competitor entries with these attributes:
+           - name: The official brand name of the competing company
+           - description: A short description of what they do and how they relate to {company_name}
+        """
+        
+        response = OpenAIClient._get_structured_completion(
+            tools,
+            "create_structured_data",
+            system_prompt,
+            content_prompt
+        )
+        
+        return response
 
 
 if __name__ == "__main__":
@@ -267,19 +232,36 @@ if __name__ == "__main__":
     import os
     os.environ["SSL_CERT_FILE"] = certifi.where()
     
-    # Example usage of the combined function
-    with open("crawled_data.json", "r") as f:
-        crawled_data = json.load(f)
+    # Example usage of the crawl-based function
+    # with open("crawled_data.json", "r") as f:
+    #     crawled_data = json.load(f)
     
-    all_data = OpenAIClient.extract_all_from_crawl(crawled_data)
-    json.dump(all_data, open("extracted_all_data.json", "w"), indent=4)
+    # all_data = OpenAIClient.extract_all_from_crawl(crawled_data)
+    # json.dump(all_data, open("extracted_all_data.json", "w"), indent=4)
     
-    # Individual function examples are commented out
-    # Example for personas and competitors
-    # summary = "Logitech G is a leading brand in gaming gear, offering a wide range of products including gaming mice, keyboards, headsets, and racing wheels designed for both casual and professional gamers. Their products are known for advanced technology, precision, and performance, catering to the needs of gamers worldwide."
-    #response = OpenAIClient.get_personas_competitors(summary)
-    #json.dump(response, open("extracted_personas_competitors.json", "w"), indent=4)
+    # Example usage of the description-based function
+    company_name = "Logitech G"
     
-    # Example for product extraction
-    #products = OpenAIClient.get_products(crawled_data)
-    #json.dump(products, open("extracted_products.json", "w"), indent=4)
+    products_desc = """
+    Our company offers three main products:
+    1. G402 Hyperion Fury FPS Gaming Mouse
+    2. G903 LIGHTSPEED Wireless Gaming Mouse
+    3. G305 LIGHTSPEED Wireless Gaming Mouse
+    """
+    
+    personas_desc = """
+    We target the following customer segments:
+    - Hardcore Gamers
+    - Casual Gamers
+    - Professional Gamers
+    """
+    
+    competitors_desc = """
+    Our main competitors are:
+    - Razer - Market leader with premium pricing
+    - Corsair - Known for simplicity but lacks advanced features
+    - SteelSeries - New entrant with innovative technology
+    """
+    
+    structured_data = OpenAIClient.create_structured_data(products_desc, personas_desc, competitors_desc, company_name)
+    json.dump(structured_data, open("created_structured_data.json", "w"), indent=4)
