@@ -34,7 +34,7 @@ class OpenAIClient:
     def _get_structured_completion(tools, choice, system_prompt, content_prompt):
         try:
             response = OpenAIClient._client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4o",
                 messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": content_prompt}
