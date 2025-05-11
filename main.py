@@ -24,7 +24,7 @@ from reset_pins import reset_all_pins
 
 # State and Auth
 import auth
-from auth import get_current_user, create_access_token, get_token_header, verify_google_id_token
+from auth import get_current_user, create_access_token, get_token_header, verify_google_id_token, verify_token
 from services.user_services import register_user, login_user, rename_conversation, delete_conversation, get_conversation_details, get_user_conversations, toggle_conversation_pin, get_or_create_google_user
 from dto import (
     CreateUserDto, UserDto, LoginDto, 
@@ -147,6 +147,8 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
+# Removed get_user_service function
+
 # @app.options("/{path:path}")
 # async def preflight(full_path: str, request: Request) -> Response:
 #     return Response(status_code=204)
@@ -217,13 +219,18 @@ async def create_project_data(
 async def create_project_endpoint(
     project_data: CreateProjectDto, 
     token: str = Depends(get_token_header), 
-    db: Session = Depends(get_db),
-    user_service: UserManagementService = Depends(get_user_service) # Added for consistency
+    db: Session = Depends(get_db)
+    # user_service: UserManagementService = Depends(get_user_service) # Removed
 ):
-    payload = user_service.get_current_user_payload(token)
-    user_email = payload.get("sub") # Assuming 'sub' is email
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials for project creation",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    payload = auth.verify_token(token, credentials_exception) # Use auth.verify_token
+    user_email = payload.get("email") # Changed from "sub" to "email" based on auth.verify_token
     if not user_email:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
+        raise credentials_exception # Should be caught by verify_token if email is None
 
     project_repo = ProjectRepository(db)
     
@@ -241,13 +248,18 @@ async def create_project_endpoint(
 @app.get("/projects", response_model=List[ProjectDto], tags=["Projects"])
 async def get_user_projects_endpoint(
     token: str = Depends(get_token_header), 
-    db: Session = Depends(get_db),
-    user_service: UserManagementService = Depends(get_user_service)
+    db: Session = Depends(get_db)
+    # user_service: UserManagementService = Depends(get_user_service) # Removed
 ):
-    payload = user_service.get_current_user_payload(token)
-    user_email = payload.get("sub")
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials for fetching projects",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    payload = auth.verify_token(token, credentials_exception) # Use auth.verify_token
+    user_email = payload.get("email") # Changed from "sub" to "email"
     if not user_email:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
+        raise credentials_exception
     
     project_repo = ProjectRepository(db)
     projects = project_repo.get_by_user_email(user_email)
@@ -917,13 +929,18 @@ async def google_auth_endpoint(request: GoogleLoginRequest, db: Session = Depend
 async def get_project_details_endpoint(
     project_id: str, 
     token: str = Depends(get_token_header), 
-    db: Session = Depends(get_db),
-    user_service: UserManagementService = Depends(get_user_service)
+    db: Session = Depends(get_db)
+    # user_service: UserManagementService = Depends(get_user_service) # Removed
 ):
-    payload = user_service.get_current_user_payload(token)
-    user_email = payload.get("sub")
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials for project details",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    payload = auth.verify_token(token, credentials_exception) # Use auth.verify_token
+    user_email = payload.get("email") # Changed from "sub" to "email"
     if not user_email:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
+        raise credentials_exception
 
     project_repo = ProjectRepository(db)
     project = project_repo.get_by_id(project_id)
@@ -936,54 +953,21 @@ async def get_project_details_endpoint(
 @app.patch("/projects/{project_id}", response_model=ProjectDto, tags=["Projects"])
 async def update_project_details_endpoint(
     project_id: str,
-    update_data: UpdateProjectDto, # Use the new DTO
-    token: str = Depends(get_token_header),
-    db: Session = Depends(get_db),
-    user_service: UserManagementService = Depends(get_user_service)
-):
-    payload = user_service.get_current_user_payload(token)
-    user_email = payload.get("sub")
-    if not user_email:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
-
-    project_repo = ProjectRepository(db)
-    project = project_repo.get_by_id(project_id)
-
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-    if project.user_email != user_email:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User not authorized to update this project")
-
-    update_dict = update_data.model_dump(exclude_unset=True) # Only include fields that were set
-    if not update_dict:
-         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No update data provided")
-
-
-    updated_project = project_repo.update(project_id, update_dict)
-    if not updated_project:
-        # This case might be rare if get_by_id succeeded and update is well-behaved
-        # but good for robustness
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update project")
-    
-    return project_repo.to_dto(updated_project)
-
-@app.patch("/projects/{project_id}/update-data", response_model=ProjectDto, tags=["Projects"])
-async def update_project_data(
-    project_id: str,
-    update_data: UpdateProjectDataDto,
+    update_data: UpdateProjectDto, 
     token: str = Depends(get_token_header),
     db: Session = Depends(get_db)
+    # user_service: UserManagementService = Depends(get_user_service) # Removed
 ):
-    """Update project data for a specific project."""
-    try:
-        current_user = await get_current_user(token=token, db=db)
-    except HTTPException as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Authentication failed: {e.detail}"
-        )
-    
-    # Get project repository
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials for updating project",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    payload = auth.verify_token(token, credentials_exception) # Use auth.verify_token
+    user_email = payload.get("email") # Changed from "sub" to "email"
+    if not user_email:
+        raise credentials_exception
+
     project_repo = ProjectRepository(db)
     
     # Get project by ID

@@ -93,7 +93,7 @@ class UserRepository(BaseRepository[User]):
             last_name=user.last_name
         )
 
-class ProjectRepository(BaseRepository[Project, CreateProjectDto, UpdateProjectDto]):
+class ProjectRepository(BaseRepository[Project]):
     """Repository for Project entity."""
     
     def __init__(self, db_session: Session):
