@@ -21,3 +21,4 @@ cachetools>=4.0.0,<6.0.0
 zerobouncesdk
 google-auth>=2.0.0
 google-auth-oauthlib>=0.8.0
+pandas>=2.2.0
