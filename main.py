@@ -3,16 +3,18 @@ import os # Ensure os is imported early
 # from dotenv import load_dotenv # type: ignore # No longer needed here
 from core.config import settings # Import settings early to load .env
 from contextlib import asynccontextmanager # Import for lifespan manager
+import uuid # Added for correlation ID
+from urllib.parse import urlencode # Added for Google OAuth callback
 
 # --- Load Environment Variables --- 
 # load_dotenv(override=True) # Moved to the top and handled by core.config
 # --------------------------------
 
 from fastapi import FastAPI, Depends, HTTPException, status, Query, Request, Response # type: ignore
-from fastapi.responses import HTMLResponse # type: ignore
+from fastapi.responses import HTMLResponse, RedirectResponse # type: ignore # Added RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware # type: ignore
 import logging
-from typing import Dict, Any # Ensure Any is imported
+from typing import Dict, Any, List, Optional # Ensure List and Optional are imported
 import certifi # Ensure certifi is imported before use
 from sqlalchemy.orm import Session # type: ignore
 from passlib.context import CryptContext # type: ignore
@@ -22,16 +24,17 @@ from reset_pins import reset_all_pins
 
 # State and Auth
 import auth
-from auth import get_current_user, create_access_token, get_token_header, verify_google_id_token
+from auth import get_current_user, create_access_token, get_token_header, verify_google_id_token, verify_token
 from services.user_services import register_user, login_user, rename_conversation, delete_conversation, get_conversation_details, get_user_conversations, toggle_conversation_pin, get_or_create_google_user
 from dto import (
     CreateUserDto, UserDto, LoginDto, 
     ConversationDto, CreateConversationDto,
     MessageDto, SendMessageDto, ConversationStateDto,
     UpdateConversationStateDto, RenameConversationDto,
-    ProjectDto, CreateProjectDto, UpdateProjectDataDto
+    ProjectDto, CreateProjectDto, UpdateProjectDataDto,
+    UpdateProjectDto
 )
-from pydantic import BaseModel # Add this import
+from pydantic import BaseModel, Field # Add Field
 
 # Database and Models
 from database import (
@@ -41,10 +44,14 @@ from database import (
     close_valkey_pool,  # Make sure this is imported
     get_valkey_connection 
 )
-from models import Base, User
+from models import Base, User as UserModel # Alias User to UserModel
+from models import GoogleService as GoogleServiceModel # Added
 from repositories import ConversationRepository, MessageRepository, UserRepository, ProjectRepository
 from services.agency_services import AgencyService
 from services.project_services import extract_project_data, generate_project_data
+from services.google_oauth_service import GoogleOAuthService # Added
+from services.search_console_service import SearchConsoleService # Added
+from services.analytics_service import AnalyticsService # Added
 # from utils.valkey_utils import publish_message_to_valkey
 import json
 
@@ -58,17 +65,9 @@ elif certifi.where(): # Default to certifi.where() if not in settings
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Cache TTLs
-MESSAGES_CACHE_TTL_SECONDS = 60  # 1 minute
-# CONVERSATION_DETAILS_CACHE_TTL_SECONDS = 300 # Defined in user_services.py
-# USER_CONVERSATIONS_CACHE_TTL_SECONDS = 120 # Defined in user_services.py
-
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 # Lifespan manager for startup and shutdown events
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app_instance: FastAPI): # Changed 'app' to 'app_instance' to avoid conflict if app is defined globally later
     # Startup logic
     logger.info("Application startup (lifespan)... Genta was here")
     logger.info("Creating Valkey/Redis connection pool (lifespan)... Genta was here")
@@ -101,22 +100,54 @@ app = FastAPI(
         {
             "name": "Projects",
             "description": "Operations related to projects"
+        },
+        {
+            "name": "Google OAuth",
+            "description": "Operations related to Google OAuth"
+        },
+        {
+            "name": "Google Search Console",
+            "description": "Operations for Google Search Console"
+        },
+        {
+            "name": "Google Analytics 4",
+            "description": "Operations for Google Analytics 4"
         }
     ],
     lifespan=lifespan # Add the lifespan manager here
 )
 
-# Configure CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173","http://localhost:8000", "http://178.128.90.137", "https://front-genta.xyz", "http://front-genta.xyz"],  # Or restrict to your frontend URL like ["https://yourfrontend.com"]
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Correlation ID Middleware
+@app.middleware("http")
+async def correlation_id_middleware(request: Request, call_next):
+    # Check for incoming header, otherwise generate a new one
+    correlation_id = request.headers.get("X-Correlation-ID")
+    if not correlation_id:
+        correlation_id = str(uuid.uuid4())
+    
+    # Store it in request.state to make it accessible in path operations
+    request.state.correlation_id = correlation_id
+    
+    # Call the next middleware or path operation
+    response = await call_next(request)
+    
+    # Add it to the response headers
+    response.headers["X-Correlation-ID"] = correlation_id
+    
+    return response
+
+# Cache TTLs
+MESSAGES_CACHE_TTL_SECONDS = 60  # 1 minute
+# CONVERSATION_DETAILS_CACHE_TTL_SECONDS = 300 # Defined in user_services.py
+# USER_CONVERSATIONS_CACHE_TTL_SECONDS = 120 # Defined in user_services.py
+
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
+
+# Removed get_user_service function
 
 # @app.options("/{path:path}")
 # async def preflight(full_path: str, request: Request) -> Response:
@@ -141,7 +172,7 @@ async def login_for_access_token(login_data: LoginDto, db=Depends(get_db)):
     return await login_user(login_data, db)
 
 @app.post("/subscribe", tags=["User"])
-async def subscribe_user_endpoint(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def subscribe_user_endpoint(db: Session = Depends(get_db), current_user: UserModel = Depends(get_current_user)):
     """Allows an authenticated user to 'subscribe'."""
 
     if current_user.email.endswith("@mamba.agency"):
@@ -215,53 +246,54 @@ async def create_project_data(
         )
 
 @app.post("/projects", response_model=ProjectDto, tags=["Projects"])
-async def create_project(
-    project_data: CreateProjectDto,
-    token: str = Depends(get_token_header),
+async def create_project_endpoint(
+    project_data: CreateProjectDto, 
+    token: str = Depends(get_token_header), 
     db: Session = Depends(get_db)
+    # user_service: UserManagementService = Depends(get_user_service) # Removed
 ):
-    """Create a new project."""
-    # Verify token and get current user
-    try:
-        current_user = await get_current_user(token=token, db=db)
-        logger.info(f"User {current_user.email} authenticated for new project creation")
-    except HTTPException as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Authentication failed: {e.detail}"
-        )
-    
-    # Create project repository
-    project_repo = ProjectRepository(db)
-    
-    # Create project from DTO
-    project = project_repo.create_from_dto(project_data, current_user.email)
-    
-    logger.info(f"Created new project {project.id} for user {current_user.email}")
-    
-    # Return the project as DTO
-    return project_repo.to_dto(project)
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials for project creation",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    payload = auth.verify_token(token, credentials_exception) # Use auth.verify_token
+    user_email = payload.get("email") # Changed from "sub" to "email" based on auth.verify_token
+    if not user_email:
+        raise credentials_exception # Should be caught by verify_token if email is None
 
-@app.get("/projects", response_model=list[ProjectDto], tags=["Projects"])
-async def get_user_projects(
-    token: str = Depends(get_token_header),
-    db: Session = Depends(get_db)
-):
-    """Get all projects for the current user."""
-    try:
-        current_user = await get_current_user(token=token, db=db)
-    except HTTPException as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Authentication failed: {e.detail}"
-        )
-    
-    # Get projects for user
     project_repo = ProjectRepository(db)
-    projects = project_repo.get_for_user(current_user.email)
     
-    # Convert to DTOs
-    return [project_repo.to_dto(project) for project in projects]
+    # Check for existing project with the same name for the user
+    existing_project = project_repo.get_by_name_and_user(project_data.name, user_email)
+    if existing_project:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Project with name '{project_data.name}' already exists for this user."
+        )
+        
+    new_project_model = project_repo.create_from_dto(project_data, user_email)
+    return project_repo.to_dto(new_project_model)
+
+@app.get("/projects", response_model=List[ProjectDto], tags=["Projects"])
+async def get_user_projects_endpoint(
+    token: str = Depends(get_token_header), 
+    db: Session = Depends(get_db)
+    # user_service: UserManagementService = Depends(get_user_service) # Removed
+):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials for fetching projects",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    payload = auth.verify_token(token, credentials_exception) # Use auth.verify_token
+    user_email = payload.get("email") # Changed from "sub" to "email"
+    if not user_email:
+        raise credentials_exception
+    
+    project_repo = ProjectRepository(db)
+    projects = project_repo.get_by_user_email(user_email)
+    return [project_repo.to_dto(p) for p in projects]
 
 @app.post("/chat", tags=["Chat"])
 async def create_chat(
@@ -924,58 +956,48 @@ async def google_auth_endpoint(request: GoogleLoginRequest, db: Session = Depend
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Google authentication failed.")
 
 @app.get("/projects/{project_id}", response_model=ProjectDto, tags=["Projects"])
-async def get_project_details(
-    project_id: str,
-    token: str = Depends(get_token_header),
+async def get_project_details_endpoint(
+    project_id: str, 
+    token: str = Depends(get_token_header), 
     db: Session = Depends(get_db)
+    # user_service: UserManagementService = Depends(get_user_service) # Removed
 ):
-    """Get details for a specific project."""
-    try:
-        current_user = await get_current_user(token=token, db=db)
-    except HTTPException as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Authentication failed: {e.detail}"
-        )
-    
-    # Get project repository
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials for project details",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    payload = auth.verify_token(token, credentials_exception) # Use auth.verify_token
+    user_email = payload.get("email") # Changed from "sub" to "email"
+    if not user_email:
+        raise credentials_exception
+
     project_repo = ProjectRepository(db)
-    
-    # Get project by ID
     project = project_repo.get_by_id(project_id)
     if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found"
-        )
-    
-    # Verify ownership
-    if project.user_email != current_user.email:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have access to this project"
-        )
-    
-    # Return project as DTO
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    if project.user_email != user_email:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User not authorized to access this project")
     return project_repo.to_dto(project)
 
-@app.patch("/projects/{project_id}/update-data", response_model=ProjectDto, tags=["Projects"])
-async def update_project_data(
+@app.patch("/projects/{project_id}", response_model=ProjectDto, tags=["Projects"])
+async def update_project_details_endpoint(
     project_id: str,
-    update_data: UpdateProjectDataDto,
+    update_data: UpdateProjectDto, 
     token: str = Depends(get_token_header),
     db: Session = Depends(get_db)
+    # user_service: UserManagementService = Depends(get_user_service) # Removed
 ):
-    """Update project data for a specific project."""
-    try:
-        current_user = await get_current_user(token=token, db=db)
-    except HTTPException as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Authentication failed: {e.detail}"
-        )
-    
-    # Get project repository
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials for updating project",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    payload = auth.verify_token(token, credentials_exception) # Use auth.verify_token
+    user_email = payload.get("email") # Changed from "sub" to "email"
+    if not user_email:
+        raise credentials_exception
+
     project_repo = ProjectRepository(db)
     
     # Get project by ID
@@ -987,7 +1009,7 @@ async def update_project_data(
         )
     
     # Verify ownership
-    if project.user_email != current_user.email:
+    if project.user_email != user_email:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have access to this project"
@@ -1053,6 +1075,362 @@ async def get_conversations_for_project(
     } for conv in conversations]
     
     return {"conversations": result}
+
+@app.get("/api/google/oauth/authorize", tags=["Google OAuth"], response_class=RedirectResponse)
+async def google_oauth_authorize(
+    product: str, # "search_console" or "ga4"
+    request: Request, 
+    db: Session = Depends(get_db),
+    valkey_conn = Depends(get_valkey_connection),
+    token: str = Depends(get_token_header) 
+):
+    """
+    Initiates the Google OAuth2 flow for the specified product.
+    Redirects the user to Google's consent screen.
+    """
+    try:
+        current_user: UserModel = await get_current_user(token=token, db=db)
+    except HTTPException as e:
+        raise HTTPException(status_code=e.status_code, detail=f"Authentication required: {e.detail}")
+
+    if not current_user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not authenticated")
+
+    try:
+        service_name_enum = GoogleServiceModel(product.lower())
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid product specified. Use 'search_console' or 'ga4'.")
+
+    oauth_service = GoogleOAuthService(db=db)
+    try:
+        authorization_url = await oauth_service.build_authorization_url(
+            user_email=current_user.email,
+            service_name=service_name_enum,
+            valkey_conn=valkey_conn
+        )
+        return RedirectResponse(url=authorization_url)
+    except ValueError as e: 
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error building Google authorization URL: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not initiate Google OAuth flow.")
+
+
+@app.get(settings.GOOGLE_OAUTH_CALLBACK_PATH, tags=["Google OAuth"])
+async def google_oauth_callback(
+    code: str,
+    state: str,
+    scope: str, 
+    request: Request,
+    db: Session = Depends(get_db),
+    valkey_conn = Depends(get_valkey_connection)
+):
+    """
+    Handles the callback from Google after user authorization.
+    Exchanges the authorization code for tokens and stores them.
+    Redirects the user to the frontend.
+    """
+    oauth_service = GoogleOAuthService(db=db)
+    try:
+        result = await oauth_service.exchange_code_for_tokens(
+            code=code,
+            state_key_from_google=state, 
+            valkey_conn=valkey_conn
+        )
+        redirect_url = f"{settings.FRONTEND_URL.rstrip('/')}/settings?google_auth_status=success&service={result.get('service_name', 'unknown')}"
+        return RedirectResponse(url=redirect_url)
+
+    except HTTPException as e: 
+        error_params = urlencode({"google_auth_status": "error", "detail": e.detail})
+        redirect_url = f"{settings.FRONTEND_URL.rstrip('/')}/settings?{error_params}"
+        return RedirectResponse(url=redirect_url) 
+    except Exception as e:
+        logger.error(f"Error processing Google OAuth callback: {e}", exc_info=True)
+        error_params = urlencode({"google_auth_status": "error", "detail": "An internal error occurred during Google authentication."})
+        redirect_url = f"{settings.FRONTEND_URL.rstrip('/')}/settings?{error_params}"
+        return RedirectResponse(url=redirect_url)
+
+@app.post("/api/google/oauth/revoke", tags=["Google OAuth"], status_code=status.HTTP_204_NO_CONTENT)
+async def google_oauth_revoke(
+    product: str, # Query parameter: "search_console" or "ga4"
+    db: Session = Depends(get_db),
+    token: str = Depends(get_token_header) 
+):
+    """
+    Revokes the Google OAuth token for the specified product for the current user.
+    """
+    try:
+        current_user: UserModel = await get_current_user(token=token, db=db)
+    except HTTPException as e:
+        raise HTTPException(status_code=e.status_code, detail=f"Authentication required: {e.detail}")
+
+    if not current_user: 
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not authenticated")
+
+    try:
+        service_name_enum = GoogleServiceModel(product.lower())
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid product specified. Use 'search_console' or 'ga4'.")
+
+    oauth_service = GoogleOAuthService(db=db)
+    revoked = await oauth_service.revoke_token(
+        user_email=current_user.email,
+        service_name=service_name_enum
+    )
+
+    if not revoked:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to revoke Google token properly. Please try again or contact support if the issue persists.")
+    
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+@app.get("/api/search-console/sites", tags=["Google Search Console"])
+async def list_search_console_sites(
+    request: Request,
+    db: Session = Depends(get_db),
+    token: str = Depends(get_token_header) 
+):
+    """
+    Lists all sites (properties) the authenticated user has access to in Google Search Console.
+    """
+    try:
+        current_user: UserModel = await get_current_user(token=token, db=db)
+    except HTTPException as e:
+        raise HTTPException(status_code=e.status_code, detail=f"Authentication required: {e.detail}")
+
+    if not current_user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not authenticated")
+
+    sc_service = SearchConsoleService(db=db)
+    try:
+        sites = await sc_service.list_sites(user_email=current_user.email)
+        # If service call is successful, sites will be a list (possibly empty)
+        return {"sites": sites}
+    except HTTPException as e:
+        # Re-raise the HTTPException thrown by the service layer
+        # This will include 403 if not connected (handled by get_valid_access_token if token missing initially)
+        # or specific errors from Google API (400, 401, 403, 429, 500, 503 etc.)
+        # or 503 if a RequestError occurred during connection.
+        raise e
+    except Exception as e:
+        correlation_id = getattr(request.state, "correlation_id", "N/A")
+        log_message = f"Unexpected error in list_search_console_sites for user {current_user.email} [CorrelationID: {correlation_id}]: {e}"
+        logger.error(log_message, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected internal error occurred.")
+
+@app.get("/api/ga4/account-summaries", tags=["Google Analytics 4"])
+async def list_ga4_account_summaries(
+    db: Session = Depends(get_db),
+    token: str = Depends(get_token_header) 
+):
+    """
+    Lists all account summaries (accounts, properties, data streams) 
+    the authenticated user has access to in Google Analytics 4.
+    """
+    try:
+        current_user: UserModel = await get_current_user(token=token, db=db)
+    except HTTPException as e:
+        raise HTTPException(status_code=e.status_code, detail=f"Authentication required: {e.detail}")
+
+    analytics_service = AnalyticsService(db=db)
+    account_summaries = await analytics_service.list_account_summaries(user_email=current_user.email)
+
+    if account_summaries is None:
+        oauth_service = GoogleOAuthService(db=db) 
+        token_exists = oauth_service.token_repo.get_token(current_user.email, GoogleServiceModel.GOOGLE_ANALYTICS_4)
+        if not token_exists:
+             raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Google Analytics 4 not connected for this user. Please connect it first via the OAuth flow."
+            )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not retrieve account summaries from Google Analytics at this time. Please try again later."
+        )
+
+    return {"account_summaries": account_summaries}
+
+# New Pydantic model for Search Console Query request body
+class SearchConsoleQueryRequest(BaseModel):
+    startDate: str = Field(..., examples=["2023-01-01"], description="Start date in YYYY-MM-DD format.")
+    endDate: str = Field(..., examples=["2023-01-31"], description="End date in YYYY-MM-DD format.")
+    dimensions: List[str] = Field(..., examples=[["query", "page"]], description="List of dimensions to group by.")
+    dimensionFilterGroups: Optional[List[Dict[str, Any]]] = Field(None, description="Optional. Filters for dimensions.")
+    aggregationType: Optional[str] = Field(None, description="Optional. How to aggregate the data.")
+    rowLimit: Optional[int] = Field(1000, examples=[100], description="Optional. Number of rows to return.")
+    startRow: Optional[int] = Field(0, description="Optional. Zero-based index of the first row to return.")
+    type: Optional[str] = Field(None, examples=["web", "image", "video", "news", "discover", "googleNews"], description="Optional. The search type.")
+    dataState: Optional[str] = Field(None, examples=["all", "final"], description="Optional. Indicates if you want data for which freshness is guaranteed.")
+
+@app.post("/api/search-console/sites/{site_url_param}/query", tags=["Google Search Console"])
+async def query_search_console_analytics(
+    site_url_param: str, # This will capture the full path for site_url, e.g., sc-domain:example.com or https://example.com/
+    query_request: SearchConsoleQueryRequest,
+    db: Session = Depends(get_db),
+    token: str = Depends(get_token_header)
+):
+    """
+    Queries the Google Search Console searchAnalytics.query API for a specific site.
+    The `site_url_param` in the path should be the site identifier from Search Console,
+    e.g., 'sc-domain:example.com' or 'https://www.example.com/'.
+    """
+    try:
+        current_user: UserModel = await get_current_user(token=token, db=db)
+    except HTTPException as e:
+        raise HTTPException(status_code=e.status_code, detail=f"Authentication required: {e.detail}")
+
+    if not current_user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not authenticated")
+
+    sc_service = SearchConsoleService(db=db)
+    
+    try:
+        # The site_url_param is already URL-decoded by FastAPI from the path.
+        query_result = await sc_service.query_search_analytics(
+            user_email=current_user.email,
+            site_url=site_url_param, 
+            request_body=query_request.model_dump(exclude_none=True)
+        )
+        # If service call is successful, query_result will be the data from Google
+        return query_result
+    except HTTPException as e:
+        # Re-raise the HTTPException thrown by the service layer
+        raise e
+    except Exception as e:
+        logger.error(f"Unexpected error in query_search_console_analytics for user {current_user.email}, site {site_url_param}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected internal error occurred.")
+
+# Pydantic models for GA4 RunReportRequest
+class GA4DateRange(BaseModel):
+    startDate: str = Field(..., examples=["2023-10-01", "7daysAgo"])
+    endDate: str = Field(..., examples=["2023-10-31", "today"])
+    name: Optional[str] = None
+
+class GA4Dimension(BaseModel):
+    name: str = Field(..., examples=["city", "country", "date"])
+    dimensionExpression: Optional[Dict[str, Any]] = None
+
+class GA4MetricOrdering(BaseModel):
+    metricName: str
+    desc: Optional[bool] = False
+
+class GA4DimensionOrdering(BaseModel):
+    dimensionName: str
+    desc: Optional[bool] = False
+
+class GA4OrderBy(BaseModel):
+    metric: Optional[GA4MetricOrdering] = None
+    dimension: Optional[GA4DimensionOrdering] = None
+    pivot: Optional[Dict[str, Any]] = None
+    desc: Optional[bool] = False # If true, sorts by descending order.
+
+class GA4Metric(BaseModel):
+    name: str = Field(..., examples=["activeUsers", "screenPageViews", "sessions"])
+    expression: Optional[str] = None
+    invisible: Optional[bool] = False
+
+class GA4FilterStringFilter(BaseModel):
+    matchType: str = Field("EXACT", examples=["EXACT", "CONTAINS", "BEGINS_WITH", "ENDS_WITH", "FULL_REGEXP", "PARTIAL_REGEXP"])
+    value: str
+    caseSensitive: Optional[bool] = False
+
+class GA4FilterInListFilter(BaseModel):
+    values: List[str]
+    caseSensitive: Optional[bool] = False
+
+# class GA4FilterNumericValue(BaseModel): # Part of a more complex NumericFilter or BetweenFilter
+#     int64Value: Optional[str] = None
+#     doubleValue: Optional[float] = None
+
+# class GA4FilterBetweenFilter(BaseModel):
+#     fromValue: GA4FilterNumericValue
+#     toValue: GA4FilterNumericValue
+
+class GA4Filter(BaseModel):
+    fieldName: str
+    stringFilter: Optional[GA4FilterStringFilter] = None
+    inListFilter: Optional[GA4FilterInListFilter] = None
+    # numericFilter: Optional[Dict[str, Any]] = None # Placeholder for NumericFilter
+    # betweenFilter: Optional[GA4FilterBetweenFilter] = None # Placeholder for BetweenFilter
+
+class GA4FilterExpression(BaseModel):
+    andGroup: Optional['GA4FilterExpressionList'] = None
+    orGroup: Optional['GA4FilterExpressionList'] = None
+    notExpression: Optional['GA4FilterExpression'] = None
+    filter: Optional[GA4Filter] = None
+
+class GA4FilterExpressionList(BaseModel):
+    expressions: List[GA4FilterExpression]
+
+GA4FilterExpression.model_rebuild() # For forward references
+
+class GA4RunReportRequest(BaseModel):
+    dimensions: Optional[List[GA4Dimension]] = Field(None, examples=[[{"name": "country"}]])
+    metrics: Optional[List[GA4Metric]] = Field(None, examples=[[{"name": "activeUsers"}]])
+    dateRanges: Optional[List[GA4DateRange]] = Field(None, examples=[[{"startDate": "7daysAgo", "endDate": "today"}]])
+    dimensionFilter: Optional[GA4FilterExpression] = None
+    metricFilter: Optional[GA4FilterExpression] = None
+    offset: Optional[str] = Field(None, description="The row count of the start row. The first row is counted as row 0.") # String for int64
+    limit: Optional[str] = Field(None, description="The number of rows to return. If unspecified, 10,000 rows are returned.") # String for int64
+    metricAggregations: Optional[List[str]] = Field(None, description="Aggregation of metrics. Accepted values: TOTAL, MINIMUM, MAXIMUM, COUNT") # e.g. ["TOTAL", "MAXIMUM"]
+    orderBys: Optional[List[GA4OrderBy]] = None
+    currencyCode: Optional[str] = Field(None, examples=["USD"])
+    # cohortSpec: Optional[Dict[str, Any]] = None # Complex, use Dict or dedicated model
+    keepEmptyRows: Optional[bool] = False
+    returnPropertyQuota: Optional[bool] = False
+
+@app.post("/api/ga4/properties/{property_id}/run-report", tags=["Google Analytics 4"])
+async def run_ga4_report_endpoint(
+    property_id: str,
+    report_request: GA4RunReportRequest,
+    db: Session = Depends(get_db),
+    token: str = Depends(get_token_header)
+):
+    """
+    Runs a report against the Google Analytics Data API for a specific GA4 property.
+    The `property_id` is the ID of the GA4 Property (e.g., "123456789").
+    The request body should conform to the GA4 RunReportRequest schema.
+    """
+    try:
+        current_user: UserModel = await get_current_user(token=token, db=db)
+    except HTTPException as e:
+        # This will be re-raised by the service if auth fails there too,
+        # but good to have an early check.
+        raise HTTPException(status_code=e.status_code, detail=f"Authentication required: {e.detail}")
+
+    if not current_user: # Should be caught by get_current_user, but as a safeguard
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not authenticated")
+
+    analytics_service = AnalyticsService(db=db)
+    
+    try:
+        # Convert Pydantic model to dict, excluding unset fields to send a clean request to Google
+        request_body_dict = report_request.model_dump(exclude_none=True)
+        
+        report_data = await analytics_service.run_ga4_report(
+            user_email=current_user.email,
+            property_id=property_id,
+            report_request=request_body_dict
+        )
+
+        if report_data is None: # Should be handled by exceptions in service now
+            # Check if the token exists to differentiate
+            oauth_service = GoogleOAuthService(db=db)
+            token_exists = oauth_service.token_repo.get_token(current_user.email, GoogleServiceModel.GOOGLE_ANALYTICS_4)
+            if not token_exists:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Google Analytics 4 not connected for this user. Please connect it first."
+                )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Could not retrieve report from Google Analytics at this time. Ensure the Property ID is correct and you have access."
+            )
+        return report_data
+    except HTTPException as e: # Catch exceptions from the service (like 401, 403, 500, 503 from Google)
+        raise e # Re-raise them
+    except Exception as e: # Catch any other unexpected errors
+        logger.error(f"Unexpected error in run_ga4_report_endpoint for property {property_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An internal server error occurred.")
 
 if __name__ == "__main__":
     print("Starting FastAPI server...")

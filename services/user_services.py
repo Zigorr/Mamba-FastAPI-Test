@@ -175,7 +175,7 @@ def update_user(email: str, user_data: dict, db: Session) -> Optional[UserDto]:
         return None
     
     # Update user
-    updated_user = user_repo.update(user, user_data)
+    updated_user = user_repo.update(user.email, user_data)
     
     # Return user DTO
     return UserDto(
@@ -497,7 +497,7 @@ async def get_user_conversations(current_user_email: str, db: Session = None):
         conversation_list.append({
             "id": conversation.id,
             "name": conversation.name,
-            "updated_at": conversation.updated_at,
+            "updated_at": conversation.updated_at.isoformat() if conversation.updated_at else None,
             "is_pinned": conversation.is_pinned
         })
     

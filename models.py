@@ -3,6 +3,8 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
 import datetime
+import enum
+from sqlalchemy import Enum as SQLAlchemyEnum
 
 class User(Base):
     __tablename__ = "users"
@@ -20,6 +22,7 @@ class User(Base):
     conversations = relationship("Conversation", back_populates="user", cascade="all, delete-orphan")
     messages = relationship("Message", back_populates="sender")
     projects = relationship("Project", back_populates="user", cascade="all, delete-orphan")
+    google_oauth_tokens = relationship("GoogleOAuthToken", back_populates="user", cascade="all, delete-orphan")
     created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
     updated_at = Column(DateTime(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()"))
     
@@ -36,6 +39,7 @@ class Project(Base):
     website_url = Column(String, nullable=True)
     project_data = Column(JSON, nullable=True, default={})
     user_email = Column(String, ForeignKey("users.email"), nullable=False, index=True)
+    gsc_site_url = Column(String, nullable=True, index=True) # New field for GSC site URL
     created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
     updated_at = Column(DateTime(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()"))
     
@@ -92,4 +96,28 @@ class Message(Base):
     # Add compound index for message filtering and sorting
     __table_args__ = (
         Index('idx_message_conv_timestamp', 'conversation_id', 'timestamp'),
+    )
+
+class GoogleService(enum.Enum):
+    SEARCH_CONSOLE = "search_console"
+    GOOGLE_ANALYTICS_4 = "ga4"
+
+class GoogleOAuthToken(Base):
+    __tablename__ = "google_oauth_tokens"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_email = Column(String, ForeignKey("users.email"), nullable=False, index=True)
+    service_name = Column(SQLAlchemyEnum(GoogleService), nullable=False, index=True)
+    access_token = Column(Text, nullable=False)
+    refresh_token = Column(Text, nullable=True) # Refresh token might not always be present or might be revoked
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    scopes = Column(JSON, nullable=True) # Store scopes as a list of strings
+
+    created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
+    updated_at = Column(DateTime(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()"))
+
+    user = relationship("User", back_populates="google_oauth_tokens")
+
+    __table_args__ = (
+        Index('idx_google_token_user_service', 'user_email', 'service_name', unique=True), # Ensure one token per user per service
     )

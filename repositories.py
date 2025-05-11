@@ -2,16 +2,18 @@ from typing import List, Optional, Dict, Any, Type, TypeVar, Generic
 from sqlalchemy.orm import Session, load_only
 from sqlalchemy import and_, or_, desc, select, asc
 from sqlalchemy.sql import func
+from sqlalchemy.dialects.postgresql import insert
 import datetime
 import uuid
 import pickle
 
-from models import User, Conversation, Message, Project
+from models import User, Conversation, Message, Project, GoogleOAuthToken, GoogleService
 from dto import (
     UserDto, CreateUserDto, 
     ConversationDto, CreateConversationDto,
     MessageDto, SendMessageDto,
     ProjectDto, CreateProjectDto,
+    UpdateProjectDto,
 )
 
 T = TypeVar('T')
@@ -94,8 +96,8 @@ class UserRepository(BaseRepository[User]):
 class ProjectRepository(BaseRepository[Project]):
     """Repository for Project entity."""
     
-    def __init__(self, db: Session):
-        super().__init__(db, Project)
+    def __init__(self, db_session: Session):
+        super().__init__(Project, db_session)
     
     def get_by_id(self, project_id: str) -> Optional[Project]:
         """Get project by ID."""
@@ -105,26 +107,13 @@ class ProjectRepository(BaseRepository[Project]):
         """Get all projects for a specific user."""
         return self.db.query(Project).filter(Project.user_email == email).all()
     
-    def create_from_dto(self, dto: CreateProjectDto, user_email: str) -> Project:
-        """Create a new project from DTO."""
-        # Generate ID if not provided
-        project_id = f"proj-{uuid.uuid4()}"
-        
-        # Create project
-        db_project = Project(
-            id=project_id,
-            name=dto.name,
-            website_url=dto.website_url,
-            project_data=dto.project_data or {},
-            user_email=user_email  # Set the owner of the project
-        )
-        self.db.add(db_project)
-        
-        # Commit changes
-        self.db.commit()
-        self.db.refresh(db_project)
-        
-        return db_project
+    def create_from_dto(self, create_project_dto: CreateProjectDto, user_email: str) -> Project:
+        """Create a new project from DTO, generating a UUID for id."""
+        project_data = create_project_dto.to_db_dict(user_email)
+        project_data["id"] = str(uuid.uuid4())
+        # Ensure project_data is a dict, not None, if it was optional and not provided
+        project_data["project_data"] = project_data.get("project_data") or {}
+        return super().create(project_data)
     
     def to_dto(self, project: Project) -> ProjectDto:
         """Convert Project model to ProjectDto."""
@@ -133,7 +122,8 @@ class ProjectRepository(BaseRepository[Project]):
             name=project.name,
             website_url=project.website_url,
             project_data=project.project_data,
-            user_email=project.user_email
+            user_email=project.user_email,
+            gsc_site_url=project.gsc_site_url
         )
     
     def update_project_data(self, project_id: str, project_data: Dict[str, Any]) -> Optional[Project]:
@@ -146,6 +136,10 @@ class ProjectRepository(BaseRepository[Project]):
         self.db.commit()
         self.db.refresh(project)
         return project
+
+    def get_by_user_email(self, user_email: str) -> List[Project]:
+        """Get all projects for a specific user."""
+        return self.db.query(Project).filter(Project.user_email == user_email).all()
 
 class ConversationRepository(BaseRepository[Conversation]):
     """Repository for Conversation entity."""
@@ -263,7 +257,9 @@ class ConversationRepository(BaseRepository[Conversation]):
             shared_state=conversation.shared_state,
             threads=conversation.threads,
             settings=conversation.settings,
-            is_pinned=conversation.is_pinned
+            is_pinned=conversation.is_pinned,
+            created_at=conversation.created_at,
+            updated_at=conversation.updated_at
         )
     
     def _update_project_timestamp(self, conversation_id: str):
@@ -464,12 +460,68 @@ class MessageRepository(BaseRepository[Message]):
     
     def bulk_create_messages(self, messages_data: List[Dict[str, Any]]) -> List[Message]:
         """Create multiple messages in a single database transaction."""
-        messages = [Message(**data) for data in messages_data]
-        
-        # Add all messages in one go
-        self.db.add_all(messages)
-        
-        # Commit the transaction
+        db_messages = [Message(**data) for data in messages_data]
+        self.db.add_all(db_messages)
         self.db.commit()
+        for msg in db_messages:
+            self.db.refresh(msg)
+        return db_messages
+
+class GoogleOAuthTokenRepository:
+    def __init__(self, db: Session):
+        self.db = db
+
+    def get_token(self, user_email: str, service_name: GoogleService) -> Optional[GoogleOAuthToken]:
+        return self.db.query(GoogleOAuthToken).filter(
+            GoogleOAuthToken.user_email == user_email,
+            GoogleOAuthToken.service_name == service_name
+        ).first()
+
+    def create_or_update_token(
+        self,
+        user_email: str,
+        service_name: GoogleService,
+        access_token: str,
+        expires_at: datetime.datetime,
+        scopes: List[str],
+        refresh_token: Optional[str] = None
+    ) -> GoogleOAuthToken:
+        """
+        Creates a new token or updates an existing one for the given user and service.
+        Uses PostgreSQL's ON CONFLICT DO UPDATE (upsert) functionality.
+        """
+        stmt = insert(GoogleOAuthToken).values(
+            user_email=user_email,
+            service_name=service_name,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expires_at=expires_at,
+            scopes=scopes,
+        )
+
+        on_conflict_stmt = stmt.on_conflict_do_update(
+            index_elements=['user_email', 'service_name'],
+            set_={
+                'access_token': stmt.excluded.access_token,
+                'refresh_token': stmt.excluded.refresh_token, 
+                'expires_at': stmt.excluded.expires_at,
+                'scopes': stmt.excluded.scopes,
+                'updated_at': datetime.datetime.now(datetime.timezone.utc)
+            }
+        )
         
-        return messages
+        result = self.db.execute(on_conflict_stmt.returning(GoogleOAuthToken))
+        self.db.commit()
+        token_orm = result.scalar_one_or_none()
+        
+        if token_orm:
+             self.db.refresh(token_orm)
+        return token_orm
+
+    def delete_token(self, user_email: str, service_name: GoogleService) -> bool:
+        token = self.get_token(user_email=user_email, service_name=service_name)
+        if token:
+            self.db.delete(token)
+            self.db.commit()
+            return True
+        return False

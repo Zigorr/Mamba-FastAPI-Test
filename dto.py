@@ -69,6 +69,7 @@ class ProjectDto(BaseDto):
     website_url: Optional[str] = None
     project_data: Optional[Dict[str, Any]] = None
     user_email: str
+    gsc_site_url: Optional[str] = None
     
     model_config = {
         "from_attributes": True
@@ -78,6 +79,7 @@ class CreateProjectDto(BaseDto):
     name: str
     website_url: Optional[str] = None
     project_data: Optional[Dict[str, Any]] = None
+    gsc_site_url: Optional[str] = None
     
     def to_db_dict(self, user_email: str):
         """Convert to dict suitable for creating a Project model."""
@@ -85,12 +87,21 @@ class CreateProjectDto(BaseDto):
             'name': self.name,
             'website_url': self.website_url,
             'project_data': self.project_data or {},
-            'user_email': user_email
+            'user_email': user_email,
+            'gsc_site_url': self.gsc_site_url
         }
 
 class UpdateProjectDataDto(BaseDto):
-    """DTO for updating project data."""
+    """DTO for updating project_data JSON blob specifically."""
     project_data: Dict[str, Any]
+
+# New DTO for general project updates
+class UpdateProjectDto(BaseDto):
+    """DTO for updating various project fields."""
+    name: Optional[str] = None
+    website_url: Optional[str] = None
+    project_data: Optional[Dict[str, Any]] = None
+    gsc_site_url: Optional[str] = None
 
 # New DTOs for concurrency features
 
@@ -104,6 +115,8 @@ class ConversationDto(BaseDto):
     settings: Optional[List[Dict[str, Any]]] = None
     latest_message: Optional["MessageDto"] = None
     is_pinned: Optional[bool] = False
+    created_at: Optional[datetime.datetime] = None
+    updated_at: Optional[datetime.datetime] = None
     
     model_config = {
         "arbitrary_types_allowed": True,
@@ -119,8 +132,6 @@ class ConversationDto(BaseDto):
             project_id=model.project_id,
             created_at=model.created_at,
             updated_at=model.updated_at,
-            participants=participants or [],
-            messages=messages or [],
             shared_state=model.shared_state,
             threads=model.threads,
             settings=model.settings,

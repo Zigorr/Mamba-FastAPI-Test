@@ -1,0 +1,55 @@
+# Git
+.git
+.gitignore
+
+# Docker
+.dockerignore
+docker-compose.yml
+dockerfile
+nginx/
+certbot/
+
+# Python virtual environment
+.venv
+venv
+env
+ENV
+
+# Python cache files
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# IDE and OS specific
+.vscode/
+.idea/
+.DS_Store
+*.swo
+*.swp
+
+# Local environment files
+.env
+*.env.*
+!.env.example
+
+# Test files and coverage reports
+tests/
+*.test.py
+*.spec.py
+htmlcov/
+.coverage
+pytest.ini
+
+# Node.js
+# node_modules/
+# package-lock.json
+# yarn.lock
+
+# Build artifacts
+# dist/
+# build/
+# *.egg-info/
+
+# Log files
+*.log 
