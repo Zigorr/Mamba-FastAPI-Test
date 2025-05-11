@@ -15,8 +15,8 @@ import traceback
 class ToFuListTool(BaseTool):
     """
     A tool that finds keywords for products using DataForSEO, focusing on Top-of-Funnel (ToFu) and Middle-of-Funnel (MoFu) intent.
-    It takes brand information and product data from shared state, determines the target language
-    based on market_geo, generates ToFu/MoFu seed keywords, requests related keywords using DataForSEO,
+    It takes product data from the project in shared state, determines the target language
+    based on geo_market, generates ToFu/MoFu seed keywords, requests related keywords using DataForSEO,
     gathers keyword data (volume, difficulty, intent), then stores it in shared state.
     """
 
@@ -25,32 +25,32 @@ class ToFuListTool(BaseTool):
         Main execution method for the ToFuListTool.
         """
 
-        data = self._shared_state.get('business_info_data')
+        project = self._shared_state.get('project')
+        project_data = project.get('project_data')
 
         # Initialize keywords list for results
         keywords_list = []
 
-        # Check if business data exists
-        if not data:
-            return "No business information found in shared state."
+        # Check if project data exists
+        if not project:
+            return "No project information found in shared state."
 
         # --- Determine Location and Language --- 
-        target_location = data.get('market_geo', 'United States')
+        target_location = project_data.get('geo_market', 'United States')
         target_language = DataForSEOClient.get_language_for_location(target_location)
         print(f"Using Location: '{target_location}', Language: '{target_language}' for API calls.")
         # --- End Determine Location and Language --- 
 
         # Get products/services Dictionary
-        products = data.get('products_services')
+        products = project_data.get('products')
+        target_personas = project_data.get('personas')
 
         # Check if it's a List and not empty
         if not isinstance(products, list):
-            return "'products_services' in shared state is not a List."
+            return "'products' in project data is not a List."
 
         if not products:
-             return "No products or services found in business information (List is empty)."
-
-
+             return "No products found in project data (List is empty)."
 
         # Initialize keywords by product dictionary
         keywords_by_product = {}
@@ -58,7 +58,7 @@ class ToFuListTool(BaseTool):
         # Process each product (row in the DataFrame)
         for index, product in enumerate(products):
 
-            seeds = self._get_tofu_mofu_seeds(product)
+            seeds = self._get_tofu_mofu_seeds(product, target_personas)
 
             product_name = product.get('name', '')
             if not product_name:
@@ -124,24 +124,15 @@ class ToFuListTool(BaseTool):
 
         return f"Keywords table {table_id} has been saved to shared state."
 
-    def _get_tofu_mofu_seeds(self, product):
+    def _get_tofu_mofu_seeds(self, product, target_personas):
         """
         Internal method to get ToFu and MoFu seeds for a product.
         Agent is not allowed to call this method directly.
         """
         product_name = product.get('name', '')
         product_description = product.get('description', '')
-        product_target_persona = product.get('target_persona')
-        #product_url = product.get('url', '')
-        product_url_summary = product.get('url_summary', '')
-
-        # if product_url:
-        #     # Only try to get the summary if a URL exists
-        #     try:
-        #         product_url_summary = FireCrawlClient.extract_product_url_summary(product_url)
-        #     except Exception as e:
-        #         print(f"Error calling FireCrawlClient: {e}")
-        #         product_url_summary = None # Ensure it's None on error
+        personas_markdown = "\n".join([f"**{persona.get('name', '')}**: {persona.get('description', '')}" for persona in target_personas])
+        product_url_summary = None
 
         prompt = f"""
         # ROLE: SEO Keyword Strategist (ToFu/MoFu Specialist)
@@ -153,7 +144,7 @@ class ToFuListTool(BaseTool):
         You will receive the following information:
         1.  **Offering Name:** The official name.
         2.  **Offering Description:** Key features, benefits, problems solved, location, etc.
-        3.  **Target Persona:** Core needs, pain points, goals, and questions related to the offering.
+        3.  **Target Personas:** Core needs, pain points, goals, and questions related to the offering.
         4.  **Offering URL Page Summary (if available):** Summary of the offering's primary URL content.
 
         # TASK:
@@ -182,7 +173,7 @@ class ToFuListTool(BaseTool):
         --- PRODUCT INFO ---
         Product Name: {product_name}
         Product Description: {product_description}
-        Product Target Persona: {product_target_persona}
+        Target Personas: {personas_markdown}
         {f"Product URL Page Summary: {product_url_summary}" if product_url_summary else "(No URL summary available)"}
         ---
         """
@@ -223,27 +214,37 @@ if __name__ == "__main__":
 
     tool = ToFuListTool()
 
-
-    # Provide default mock data if no file found
-    mock_business_data = {
-        'company_name': 'Test Co',
-        'website': 'http://example.com',
-        'niche': 'Testing',
-        'location': 'United States',
-        'target_personas': 'Testers',
-        'market_geo': 'United States', # Default for mock
-        'value_props': 'Great tests',
-        'products_services': [
-            {
-                'name': 'Mock Product',
-                'url': '',
-                'description': 'A product for mocking.',
-                'target_persona': 'Mock users',
-                'priority': '5'
-            }
-        ]
+    # Mock project data structure
+    mock_project = {
+        'name': 'Test Project',
+        'website_url': 'http://example.com',
+        'project_data': {
+            'products': [
+                {
+                    'name': 'Mock Product',
+                    'url': '',
+                    'description': 'A product for testing.',
+                    'priority': 5
+                }
+            ],
+            'personas': [
+                {
+                    'name': 'Mock Persona',
+                    'description': 'A test persona for this product.',
+                    'priority': 10
+                }
+            ],
+            'competitors': [
+                {
+                    'name': 'Mock Competitor',
+                    'description': 'A competitor in the market'
+                }
+            ],
+            'geo_market': 'United States'
+        }
     }
-    tool._shared_state.set('business_info_data', mock_business_data)
+    
+    tool._shared_state.set('project', mock_project)
 
     # Run the tool
     response = tool.run()

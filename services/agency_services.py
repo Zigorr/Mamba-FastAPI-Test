@@ -86,6 +86,16 @@ class AgencyService:
                 for k, v in initial_shared_state.items():
                     agency.shared_state.set(k, v)
             
+            # Get project data and add it to shared state
+            if agency.shared_state.get('project') is None:
+                project = conversation_repo.get_project_by_conversation_id(conversation_id)
+                if project:
+                    agency.shared_state.set('project', {
+                        'name': project.name,
+                        'website_url': project.website_url,
+                        'project_data': project.project_data
+                    })
+            
             # Persist any initial state changes made by Agency creation itself (if any).
             # The agency.shared_state.data might contain initial defaults set by the Agency.
             conversation_repo.save_shared_state(conversation_id, agency.shared_state.data)

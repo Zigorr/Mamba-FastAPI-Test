@@ -698,128 +698,55 @@ async def get_conversations_with_messages(
     
     return {"conversations": result}
 
-@app.post("/submit_form/{conversation_id}", tags=["Chat"])
-async def submit_form(
+@app.post("/conversations/{conversation_id}/toggle-pin", response_model=ConversationDto, tags=["Chat"])
+async def toggle_pin_endpoint(
     conversation_id: str,
-    request: dict,
     token: str = Depends(get_token_header),
     db: Session = Depends(get_db)
 ):
-    """Submit a form for a conversation."""
+    """Toggle the pinned status of a conversation."""
     # Verify token and get current user
     try:
         current_user = await get_current_user(token=token, db=db)
-        logger.info(f"User {current_user.email} authenticated")
-
-        # Token Management Logic (for submit_form)
-        is_mamba_user = current_user.email.endswith("@mamba.agency")
-        is_subscribed_user = current_user.is_subscribed
-        can_have_unlimited_tokens = is_mamba_user or is_subscribed_user 
-
-        if not can_have_unlimited_tokens: 
-            now = datetime.now(timezone.utc)
-            needs_token_reset = False
-            if current_user.tokens_last_reset_at is None or \
-               (now - current_user.tokens_last_reset_at > timedelta(hours=24)):
-                needs_token_reset = True
-
-            if needs_token_reset:
-                current_user.token_limit = settings.DEFAULT_FREE_USER_TOKEN_LIMIT
-                current_user.tokens_last_reset_at = now
-                db.add(current_user)
-                db.commit()
-                db.refresh(current_user)
-            
-            if current_user.token_limit is None or current_user.token_limit <= 0:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Token limit reached. Please subscribe or wait for tokens to reset."
-                )
-        # End of Token Management Logic
-
+        logger.info(f"User {current_user.email} attempting to toggle pin for conversation {conversation_id}")
     except HTTPException as e:
         raise e
 
-    # Get message from request
-    form_data = request.get("form_data")
-    form_action = request.get("action", None)
-    if not form_data:
-        if form_action == "cancel_form":
-            message = "I have cancelled the form"
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Form data is required"
-            )
+    # Call the service function
+    return await toggle_conversation_pin(conversation_id, current_user.email, db)
 
-    conversation_repo = ConversationRepository(db)
-    message_repo = MessageRepository(db)  # Create message repository
-
-    # Validate that the conversation belongs to the current user
-    conversation = conversation_repo.get_by_id(conversation_id)
-    if not conversation:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found"
-        )
-    
-    if conversation.user_email != current_user.email:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have access to this conversation"
-        )
-
-    logger.info(f"Received business form data from client {current_user.email} for conversation {conversation_id}")
-    message = "I have submitted the form"
-    # Save user message to database
-    user_message_dto = SendMessageDto(
-        conversation_id=conversation_id,
-        content=message
-    )
-    message_repo.create_from_dto(user_message_dto, current_user.email, is_from_agency=False)
-
-    # Initialize or load agency
-    agency = AgencyService.initialize_agency(conversation_id, conversation_repo)
-
+@app.get("/conversations/{conversation_id}", tags=["Chat"])
+async def get_conversation_details_endpoint(
+    conversation_id: str,
+    token: str = Depends(get_token_header),
+    db: Session = Depends(get_db)
+):
+    """Get detailed information about a specific conversation."""
+    # Verify token and get current user
     try:
-        # Set the form data in the shared state
-        if form_data:
-            agency.shared_state.set('business_info_data', form_data)
-        if form_action == "cancel_form":
-            agency.shared_state.set('action', None)
-        # Get completion from agency
-        agency_response = agency.get_completion(message=message)
-        
-        # Decrement token for free users if operation was successful
-        if not can_have_unlimited_tokens: 
-            if current_user.token_limit is not None and current_user.token_limit > 0:
-                current_user.token_limit -= 1 
-                db.add(current_user)
-                db.commit()
+        current_user = await get_current_user(token=token, db=db)
+        logger.info(f"User {current_user.email} requesting details for conversation {conversation_id}")
+    except HTTPException as e:
+        raise e
 
-        # Save updated state
-        conversation_repo.save_shared_state(conversation_id, agency.shared_state.data)
-        
-        # Save AI response to database
-        ai_message_dto = SendMessageDto(
-            conversation_id=conversation_id,
-            content=agency_response
-        )
-        message_repo.create_from_dto(ai_message_dto, None, is_from_agency=True)
-        
-        if agency.shared_state.get("action"):
-            action = agency.shared_state.get("action")
-            return {"response": agency_response, "is_from_agency": True, "action": action}
-        else:
-            return {"response": agency_response, "is_from_agency": True}
-    except Exception as e:
-        logger.error(f"Error processing message for {conversation_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing message: {str(e)}"
-        )
+    # Call the service function
+    return await get_conversation_details(conversation_id, current_user.email, db)
 
-    # --- Update any other publishing calls similarly (e.g., in /submit_form) ---
+@app.get("/user/conversations", tags=["Chat"])
+async def get_user_conversations_endpoint(
+    token: str = Depends(get_token_header),
+    db: Session = Depends(get_db)
+):
+    """Get all conversations belonging to the authenticated user with essential details."""
+    # Verify token and get current user
+    try:
+        current_user = await get_current_user(token=token, db=db)
+        logger.info(f"User {current_user.email} requesting their conversations")
+    except HTTPException as e:
+        raise e
+
+    # Call the service function with the user's email and database session
+    return await get_user_conversations(current_user.email, db)
 
 @app.post("/get_keywords/{conversation_id}", tags=["Chat"])
 async def get_keywords(
@@ -912,56 +839,6 @@ async def rename_conversation_endpoint(
 
     # Call the service function
     return await rename_conversation(conversation_id, rename_data.name, current_user.email, db)
-
-@app.get("/conversations/{conversation_id}", tags=["Chat"])
-async def get_conversation_details_endpoint(
-    conversation_id: str,
-    token: str = Depends(get_token_header),
-    db: Session = Depends(get_db)
-):
-    """Get detailed information about a specific conversation."""
-    # Verify token and get current user
-    try:
-        current_user = await get_current_user(token=token, db=db)
-        logger.info(f"User {current_user.email} requesting details for conversation {conversation_id}")
-    except HTTPException as e:
-        raise e
-
-    # Call the service function
-    return await get_conversation_details(conversation_id, current_user.email, db)
-
-@app.get("/user/conversations", tags=["Chat"])
-async def get_user_conversations_endpoint(
-    token: str = Depends(get_token_header),
-    db: Session = Depends(get_db)
-):
-    """Get all conversations belonging to the authenticated user with essential details."""
-    # Verify token and get current user
-    try:
-        current_user = await get_current_user(token=token, db=db)
-        logger.info(f"User {current_user.email} requesting their conversations")
-    except HTTPException as e:
-        raise e
-
-    # Call the service function with the user's email and database session
-    return await get_user_conversations(current_user.email, db)
-
-@app.post("/conversations/{conversation_id}/toggle-pin", response_model=ConversationDto, tags=["Chat"])
-async def toggle_pin_endpoint(
-    conversation_id: str,
-    token: str = Depends(get_token_header),
-    db: Session = Depends(get_db)
-):
-    """Toggle the pinned status of a conversation."""
-    # Verify token and get current user
-    try:
-        current_user = await get_current_user(token=token, db=db)
-        logger.info(f"User {current_user.email} attempting to toggle pin for conversation {conversation_id}")
-    except HTTPException as e:
-        raise e
-
-    # Call the service function
-    return await toggle_conversation_pin(conversation_id, current_user.email, db)
 
 @app.post("/auth/google", tags=["Authentication"])
 async def google_auth_endpoint(request: GoogleLoginRequest, db: Session = Depends(get_db)):
