@@ -104,6 +104,8 @@ class ConversationDto(BaseDto):
     settings: Optional[List[Dict[str, Any]]] = None
     latest_message: Optional["MessageDto"] = None
     is_pinned: Optional[bool] = False
+    created_at: Optional[datetime.datetime] = None
+    updated_at: Optional[datetime.datetime] = None
     
     model_config = {
         "arbitrary_types_allowed": True,
@@ -119,8 +121,6 @@ class ConversationDto(BaseDto):
             project_id=model.project_id,
             created_at=model.created_at,
             updated_at=model.updated_at,
-            participants=participants or [],
-            messages=messages or [],
             shared_state=model.shared_state,
             threads=model.threads,
             settings=model.settings,

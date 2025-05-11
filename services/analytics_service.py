@@ -66,14 +66,20 @@ class AnalyticsService:
                 
                 return all_account_summaries
             except httpx.HTTPStatusError as e:
-                logger.error(f"HTTP error calling Google Analytics Admin API for user {user_email}: {e.response.status_code} - {e.response.text}", exc_info=True)
-                return None
+                error_content = e.response.text
+                try:
+                    error_json = e.response.json()
+                    error_message = error_json.get("error", {}).get("message", error_content)
+                except ValueError:
+                    error_message = error_content.strip()
+                logger.error(f"HTTP error calling Google Analytics Admin API for user {user_email}: {e.response.status_code} - {error_message}", exc_info=True)
+                raise HTTPException(status_code=e.response.status_code, detail=f"Google Analytics API Error: {error_message}")
             except httpx.RequestError as e:
                 logger.error(f"Request error calling Google Analytics Admin API for user {user_email}: {e}", exc_info=True)
-                return None
+                raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Error connecting to Google Analytics Admin API.")
             except Exception as e:
                 logger.error(f"Unexpected error listing Google Analytics account summaries for {user_email}: {e}", exc_info=True)
-                return None
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred while listing Google Analytics account summaries.")
 
     async def run_ga4_report(self, user_email: str, property_id: str, report_request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """

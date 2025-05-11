@@ -156,13 +156,13 @@ class GoogleOAuthService:
             logger.error(f"Google OAuth Error refreshing token for {user_email}, {service_name.value}: {error_description} (Type: {error_type}) - Status: {response.status_code} - Response: {response.text}")
             
             if error_type == "invalid_grant":
-                logger.warning(f"Refresh token for {user_email}, {service_name.value} is invalid. Clearing stored refresh token.")
+                logger.warning(f"Refresh token for {user_email}, {service_name.value} is invalid. Clearing stored refresh token and invalidating access token.")
                 self.token_repo.create_or_update_token(
                     user_email=user_email,
                     service_name=service_name,
-                    access_token=stored_token_orm.access_token, 
+                    access_token="",  # Invalidate access token
                     refresh_token=None, 
-                    expires_at=stored_token_orm.expires_at, 
+                    expires_at=datetime.now(timezone.utc) - timedelta(days=1), # Set to a past expiry
                     scopes=stored_token_orm.scopes or []
                 )
             return None
@@ -262,5 +262,4 @@ class GoogleOAuthService:
                 logger.warning(f"Local token for {user_email}, {service_name.value} was not found for deletion, though revocation attempt was made.")
             return True
         
-        return False
-    # TODO: Implement revoke_token method (This line is now redundant) 
+        return False 

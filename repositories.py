@@ -264,7 +264,9 @@ class ConversationRepository(BaseRepository[Conversation]):
             shared_state=conversation.shared_state,
             threads=conversation.threads,
             settings=conversation.settings,
-            is_pinned=conversation.is_pinned
+            is_pinned=conversation.is_pinned,
+            created_at=conversation.created_at,
+            updated_at=conversation.updated_at
         )
     
     def _update_project_timestamp(self, conversation_id: str):

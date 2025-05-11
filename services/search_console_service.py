@@ -65,7 +65,7 @@ class SearchConsoleService:
                 raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Error connecting to Google Search Console API.")
             except Exception as e:
                 logger.error(f"Unexpected error listing Search Console sites for {user_email}: {e}", exc_info=True)
-                return None 
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred while listing Search Console sites.")
 
     async def query_search_analytics(
         self, 

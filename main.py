@@ -4,6 +4,7 @@ import os # Ensure os is imported early
 from core.config import settings # Import settings early to load .env
 from contextlib import asynccontextmanager # Import for lifespan manager
 import uuid # Added for correlation ID
+from urllib.parse import urlencode # Added for Google OAuth callback
 
 # --- Load Environment Variables --- 
 # load_dotenv(override=True) # Moved to the top and handled by core.config
