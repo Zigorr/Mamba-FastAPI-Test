@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     # JWT Auth
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 100
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 10080  # Changed to 7 days (7 * 24 * 60 minutes)
 
     # OpenAI (if needed directly from settings)
     OPENAI_API_KEY: Optional[str] = None 
