@@ -31,7 +31,8 @@ from dto import (
     ConversationDto, CreateConversationDto,
     MessageDto, SendMessageDto, ConversationStateDto,
     UpdateConversationStateDto, RenameConversationDto,
-    ProjectDto, CreateProjectDto, UpdateProjectDataDto
+    ProjectDto, CreateProjectDto, UpdateProjectDataDto,
+    UpdateProjectDto
 )
 from pydantic import BaseModel, Field # Add Field
 
@@ -213,53 +214,44 @@ async def create_project_data(
     return extract_project_data(project_url)
 
 @app.post("/projects", response_model=ProjectDto, tags=["Projects"])
-async def create_project(
-    project_data: CreateProjectDto,
-    token: str = Depends(get_token_header),
-    db: Session = Depends(get_db)
+async def create_project_endpoint(
+    project_data: CreateProjectDto, 
+    token: str = Depends(get_token_header), 
+    db: Session = Depends(get_db),
+    user_service: UserManagementService = Depends(get_user_service) # Added for consistency
 ):
-    """Create a new project."""
-    # Verify token and get current user
-    try:
-        current_user = await get_current_user(token=token, db=db)
-        logger.info(f"User {current_user.email} authenticated for new project creation")
-    except HTTPException as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Authentication failed: {e.detail}"
-        )
-    
-    # Create project repository
-    project_repo = ProjectRepository(db)
-    
-    # Create project from DTO
-    project = project_repo.create_from_dto(project_data, current_user.email)
-    
-    logger.info(f"Created new project {project.id} for user {current_user.email}")
-    
-    # Return the project as DTO
-    return project_repo.to_dto(project)
+    payload = user_service.get_current_user_payload(token)
+    user_email = payload.get("sub") # Assuming 'sub' is email
+    if not user_email:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
 
-@app.get("/projects", response_model=list[ProjectDto], tags=["Projects"])
-async def get_user_projects(
-    token: str = Depends(get_token_header),
-    db: Session = Depends(get_db)
-):
-    """Get all projects for the current user."""
-    try:
-        current_user = await get_current_user(token=token, db=db)
-    except HTTPException as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Authentication failed: {e.detail}"
-        )
-    
-    # Get projects for user
     project_repo = ProjectRepository(db)
-    projects = project_repo.get_for_user(current_user.email)
     
-    # Convert to DTOs
-    return [project_repo.to_dto(project) for project in projects]
+    # Check for existing project with the same name for the user
+    existing_project = project_repo.get_by_name_and_user(project_data.name, user_email)
+    if existing_project:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Project with name '{project_data.name}' already exists for this user."
+        )
+        
+    new_project_model = project_repo.create_from_dto(project_data, user_email)
+    return project_repo.to_dto(new_project_model)
+
+@app.get("/projects", response_model=List[ProjectDto], tags=["Projects"])
+async def get_user_projects_endpoint(
+    token: str = Depends(get_token_header), 
+    db: Session = Depends(get_db),
+    user_service: UserManagementService = Depends(get_user_service)
+):
+    payload = user_service.get_current_user_payload(token)
+    user_email = payload.get("sub")
+    if not user_email:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
+    
+    project_repo = ProjectRepository(db)
+    projects = project_repo.get_by_user_email(user_email)
+    return [project_repo.to_dto(p) for p in projects]
 
 @app.post("/chat", tags=["Chat"])
 async def create_chat(
@@ -922,40 +914,58 @@ async def google_auth_endpoint(request: GoogleLoginRequest, db: Session = Depend
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Google authentication failed.")
 
 @app.get("/projects/{project_id}", response_model=ProjectDto, tags=["Projects"])
-async def get_project_details(
-    project_id: str,
-    token: str = Depends(get_token_header),
-    db: Session = Depends(get_db)
+async def get_project_details_endpoint(
+    project_id: str, 
+    token: str = Depends(get_token_header), 
+    db: Session = Depends(get_db),
+    user_service: UserManagementService = Depends(get_user_service)
 ):
-    """Get details for a specific project."""
-    try:
-        current_user = await get_current_user(token=token, db=db)
-    except HTTPException as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Authentication failed: {e.detail}"
-        )
-    
-    # Get project repository
+    payload = user_service.get_current_user_payload(token)
+    user_email = payload.get("sub")
+    if not user_email:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
+
     project_repo = ProjectRepository(db)
-    
-    # Get project by ID
     project = project_repo.get_by_id(project_id)
     if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found"
-        )
-    
-    # Verify ownership
-    if project.user_email != current_user.email:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have access to this project"
-        )
-    
-    # Return project as DTO
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    if project.user_email != user_email:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User not authorized to access this project")
     return project_repo.to_dto(project)
+
+@app.patch("/projects/{project_id}", response_model=ProjectDto, tags=["Projects"])
+async def update_project_details_endpoint(
+    project_id: str,
+    update_data: UpdateProjectDto, # Use the new DTO
+    token: str = Depends(get_token_header),
+    db: Session = Depends(get_db),
+    user_service: UserManagementService = Depends(get_user_service)
+):
+    payload = user_service.get_current_user_payload(token)
+    user_email = payload.get("sub")
+    if not user_email:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
+
+    project_repo = ProjectRepository(db)
+    project = project_repo.get_by_id(project_id)
+
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    if project.user_email != user_email:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User not authorized to update this project")
+
+    update_dict = update_data.model_dump(exclude_unset=True) # Only include fields that were set
+    if not update_dict:
+         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No update data provided")
+
+
+    updated_project = project_repo.update(project_id, update_dict)
+    if not updated_project:
+        # This case might be rare if get_by_id succeeded and update is well-behaved
+        # but good for robustness
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update project")
+    
+    return project_repo.to_dto(updated_project)
 
 @app.patch("/projects/{project_id}/update-data", response_model=ProjectDto, tags=["Projects"])
 async def update_project_data(

@@ -13,6 +13,7 @@ from dto import (
     ConversationDto, CreateConversationDto,
     MessageDto, SendMessageDto,
     ProjectDto, CreateProjectDto,
+    UpdateProjectDto,
 )
 
 T = TypeVar('T')
@@ -92,11 +93,11 @@ class UserRepository(BaseRepository[User]):
             last_name=user.last_name
         )
 
-class ProjectRepository(BaseRepository[Project]):
+class ProjectRepository(BaseRepository[Project, CreateProjectDto, UpdateProjectDto]):
     """Repository for Project entity."""
     
-    def __init__(self, db: Session):
-        super().__init__(db, Project)
+    def __init__(self, db_session: Session):
+        super().__init__(Project, db_session)
     
     def get_by_id(self, project_id: str) -> Optional[Project]:
         """Get project by ID."""
@@ -106,26 +107,13 @@ class ProjectRepository(BaseRepository[Project]):
         """Get all projects for a specific user."""
         return self.db.query(Project).filter(Project.user_email == email).all()
     
-    def create_from_dto(self, dto: CreateProjectDto, user_email: str) -> Project:
-        """Create a new project from DTO."""
-        # Generate ID if not provided
-        project_id = f"proj-{uuid.uuid4()}"
-        
-        # Create project
-        db_project = Project(
-            id=project_id,
-            name=dto.name,
-            website_url=dto.website_url,
-            project_data=dto.project_data or {},
-            user_email=user_email  # Set the owner of the project
-        )
-        self.db.add(db_project)
-        
-        # Commit changes
-        self.db.commit()
-        self.db.refresh(db_project)
-        
-        return db_project
+    def create_from_dto(self, create_project_dto: CreateProjectDto, user_email: str) -> Project:
+        """Create a new project from DTO, generating a UUID for id."""
+        project_data = create_project_dto.to_db_dict(user_email)
+        project_data["id"] = str(uuid.uuid4())
+        # Ensure project_data is a dict, not None, if it was optional and not provided
+        project_data["project_data"] = project_data.get("project_data") or {}
+        return super().create(project_data)
     
     def to_dto(self, project: Project) -> ProjectDto:
         """Convert Project model to ProjectDto."""
@@ -134,7 +122,8 @@ class ProjectRepository(BaseRepository[Project]):
             name=project.name,
             website_url=project.website_url,
             project_data=project.project_data,
-            user_email=project.user_email
+            user_email=project.user_email,
+            gsc_site_url=project.gsc_site_url
         )
     
     def update_project_data(self, project_id: str, project_data: Dict[str, Any]) -> Optional[Project]:
@@ -147,6 +136,10 @@ class ProjectRepository(BaseRepository[Project]):
         self.db.commit()
         self.db.refresh(project)
         return project
+
+    def get_by_user_email(self, user_email: str) -> List[Project]:
+        """Get all projects for a specific user."""
+        return self.db.query(Project).filter(Project.user_email == user_email).all()
 
 class ConversationRepository(BaseRepository[Conversation]):
     """Repository for Conversation entity."""

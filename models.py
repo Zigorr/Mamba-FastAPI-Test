@@ -39,6 +39,7 @@ class Project(Base):
     website_url = Column(String, nullable=True)
     project_data = Column(JSON, nullable=True, default={})
     user_email = Column(String, ForeignKey("users.email"), nullable=False, index=True)
+    gsc_site_url = Column(String, nullable=True, index=True) # New field for GSC site URL
     created_at = Column(DateTime(timezone=True), server_default=text("NOW()"))
     updated_at = Column(DateTime(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()"))
     
