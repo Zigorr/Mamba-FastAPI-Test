@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 import logging
 import openai
 import os
+import json
 
 load_dotenv(override=True)
 
