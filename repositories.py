@@ -97,7 +97,7 @@ class ProjectRepository(BaseRepository[Project]):
     """Repository for Project entity."""
     
     def __init__(self, db_session: Session):
-        super().__init__(Project, db_session)
+        super().__init__(db_session, Project)
     
     def get_by_id(self, project_id: str) -> Optional[Project]:
         """Get project by ID."""
