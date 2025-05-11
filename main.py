@@ -163,7 +163,7 @@ async def subscribe_user_endpoint(db: Session = Depends(get_db), current_user: U
 
 @app.post("/project-data", tags=["Projects"])
 async def create_project_data(
-    project_url: str,
+    request: dict,
     token: str = Depends(get_token_header),
     db: Session = Depends(get_db)
 ):
@@ -176,7 +176,12 @@ async def create_project_data(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Authentication failed: {e.detail}"
         )
-    
+    if not request.get("project_url"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Project URL is required"
+        )
+    project_url = request.get("project_url")
     return extract_project_data(project_url)
 
 @app.post("/projects", response_model=ProjectDto, tags=["Projects"])
