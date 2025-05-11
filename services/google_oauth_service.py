@@ -167,20 +167,32 @@ class GoogleOAuthService:
                 )
             return None
 
-        new_token_data = response.json()
-        new_access_token = new_token_data["access_token"]
-        new_expires_in = new_token_data["expires_in"]  
-        new_refresh_token = new_token_data.get("refresh_token", stored_token_orm.refresh_token)
+        response.raise_for_status()
+        token_data = response.json()
 
-        new_expires_at = datetime.now(timezone.utc) + timedelta(seconds=new_expires_in)
-        
+        new_access_token = token_data.get("access_token")
+        new_expires_in_seconds = token_data.get("expires_in")
+        # Check if Google returned a new refresh token (rotation)
+        new_refresh_token_from_google = token_data.get("refresh_token")
+
+        if not new_access_token or new_expires_in_seconds is None:
+            logger.error(f"Google token refresh response missing access_token or expires_in for user {user_email}, service {service_name.value}. Response: {token_data}")
+            return None
+
+        new_expires_at = datetime.now(timezone.utc) + timedelta(seconds=new_expires_in_seconds)
+
+        # Determine which refresh token to store: the new one if provided, otherwise the existing one.
+        refresh_token_to_store = new_refresh_token_from_google if new_refresh_token_from_google else stored_token_orm.refresh_token
+        if new_refresh_token_from_google:
+            logger.info(f"Received new refresh token from Google for user {user_email}, service {service_name.value}. Old one will be overwritten.")
+
         self.token_repo.create_or_update_token(
             user_email=user_email,
             service_name=service_name,
             access_token=new_access_token,
-            refresh_token=new_refresh_token,
+            refresh_token=refresh_token_to_store, # Pass the potentially new refresh token
             expires_at=new_expires_at,
-            scopes=stored_token_orm.scopes or [] 
+            scopes=stored_token_orm.scopes # Assuming scopes don't change on refresh
         )
         logger.info(f"Successfully refreshed access token for user {user_email}, service {service_name.value}.")
         return new_access_token
