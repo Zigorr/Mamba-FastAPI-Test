@@ -28,7 +28,7 @@ class FireCrawlClient:
     def _crawl(url: str) -> str:
         data = FireCrawlClient._app.crawl_url(
             url, 
-            limit=10, 
+            limit=5, 
             scrape_options=ScrapeOptions(formats=['markdown']),
         )
         if data.success:
