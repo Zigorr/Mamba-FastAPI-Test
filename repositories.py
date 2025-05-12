@@ -3,9 +3,11 @@ from sqlalchemy.orm import Session, load_only
 from sqlalchemy import and_, or_, desc, select, asc
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import SQLAlchemyError
 import datetime
 import uuid
 import pickle
+import logging
 
 from models import User, Conversation, Message, Project, GoogleOAuthToken, GoogleService
 from dto import (
@@ -17,6 +19,8 @@ from dto import (
 )
 
 T = TypeVar('T')
+
+logger = logging.getLogger(__name__)
 
 class BaseRepository(Generic[T]):
     """Base repository with common CRUD operations."""
@@ -148,6 +152,22 @@ class ProjectRepository(BaseRepository[Project]):
         """Get all projects for a specific user."""
         return self.db.query(Project).filter(Project.user_email == user_email).all()
 
+    def delete(self, project: Project) -> bool:
+        """Deletes a given project instance."""
+        if not project:
+            return False
+        try:
+            self.db.delete(project)
+            # Let the service layer handle commit/rollback via context manager
+            # self.db.commit()
+            logger.info(f"Project {project.id} marked for deletion.")
+            return True
+        except SQLAlchemyError as e:
+            # self.db.rollback()
+            logger.error(f"Error deleting project {project.id}: {e}", exc_info=True)
+            # Re-raise or handle as appropriate for the service layer
+            raise
+
 class ConversationRepository(BaseRepository[Conversation]):
     """Repository for Conversation entity."""
     
@@ -232,6 +252,10 @@ class ConversationRepository(BaseRepository[Conversation]):
             query = query.limit(limit)
             
         return query.all()
+    
+    def get_for_project_raw(self, project_id: str) -> List[Conversation]:
+        """Get all raw Conversation model instances for a specific project."""
+        return self.db.query(Conversation).filter(Conversation.project_id == project_id).all()
     
     def create_from_dto(self, dto: CreateConversationDto, creator_email: str) -> Conversation:
         """Create a new conversation from DTO."""
@@ -343,13 +367,28 @@ class ConversationRepository(BaseRepository[Conversation]):
         return None
 
     def delete_conversation(self, conversation_id: str) -> bool:
-        """Deletes a conversation and its associated messages (via cascade)."""
+        """Deletes a single conversation by ID."""
         conversation = self.get_by_id(conversation_id)
         if conversation:
             self.db.delete(conversation)
-            self.db.commit()
+            # Commit is handled by service/endpoint context manager
             return True
         return False
+    
+    def delete_conversations_by_ids(self, conversation_ids: List[str]) -> int:
+        """Deletes multiple conversations based on a list of IDs."""
+        if not conversation_ids:
+            return 0
+        try:
+            num_deleted = self.db.query(Conversation).filter(Conversation.id.in_(conversation_ids)).delete(synchronize_session=False)
+            # Let the service layer handle commit/rollback
+            # self.db.commit()
+            logger.info(f"Marked {num_deleted} conversations for deletion: {conversation_ids}")
+            return num_deleted
+        except SQLAlchemyError as e:
+            # self.db.rollback()
+            logger.error(f"Error deleting conversations {conversation_ids}: {e}", exc_info=True)
+            raise # Re-raise the exception
 
     def toggle_pin(self, conversation_id: str) -> Optional[Conversation]:
         """Toggle the pinned status of a conversation."""
@@ -475,13 +514,26 @@ class MessageRepository(BaseRepository[Message]):
         return MessageDto.from_db_model(message)
     
     def bulk_create_messages(self, messages_data: List[Dict[str, Any]]) -> List[Message]:
-        """Create multiple messages in a single database transaction."""
+        """Creates multiple messages in bulk."""
         db_messages = [Message(**data) for data in messages_data]
         self.db.add_all(db_messages)
-        self.db.commit()
-        for msg in db_messages:
-            self.db.refresh(msg)
+        # Commit handled by calling context
         return db_messages
+
+    def delete_messages_by_conversation_ids(self, conversation_ids: List[str]) -> int:
+        """Deletes all messages associated with the given conversation IDs."""
+        if not conversation_ids:
+            return 0
+        try:
+            num_deleted = self.db.query(Message).filter(Message.conversation_id.in_(conversation_ids)).delete(synchronize_session=False)
+            # Let the service layer handle commit/rollback
+            # self.db.commit()
+            logger.info(f"Marked {num_deleted} messages for deletion associated with conversations: {conversation_ids}")
+            return num_deleted
+        except SQLAlchemyError as e:
+            # self.db.rollback()
+            logger.error(f"Error deleting messages for conversations {conversation_ids}: {e}", exc_info=True)
+            raise # Re-raise the exception
 
 class GoogleOAuthTokenRepository:
     def __init__(self, db: Session):

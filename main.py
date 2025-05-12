@@ -48,7 +48,7 @@ from models import Base, User as UserModel # Alias User to UserModel
 from models import GoogleService as GoogleServiceModel # Added
 from repositories import ConversationRepository, MessageRepository, UserRepository, ProjectRepository
 from services.agency_services import AgencyService
-from services.project_services import extract_project_data, generate_project_data
+from services.project_services import extract_project_data, generate_project_data, delete_project_and_data
 from services.google_oauth_service import GoogleOAuthService # Added
 from services.search_console_service import SearchConsoleService # Added
 from services.analytics_service import AnalyticsService # Added
@@ -990,6 +990,64 @@ async def get_conversations_for_project(
     } for conv in conversations]
     
     return {"conversations": result}
+
+@app.delete("/projects/{project_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Projects"])
+async def delete_project_endpoint(
+    project_id: str,
+    token: str = Depends(get_token_header),
+    db: Session = Depends(get_db)
+):
+    """Deletes a project and all its associated data (conversations, messages)."""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials for deleting project",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        current_user = await get_current_user(token=token, db=db)
+        logger.info(f"User {current_user.email} attempting to delete project {project_id}")
+    except HTTPException as e:
+        raise credentials_exception # Use the more specific exception
+
+    if not current_user: # Should be caught by get_current_user, but safeguard
+        raise credentials_exception
+
+    # Call the service function to handle deletion (this needs implementation)
+    try:
+        # Assume delete_project_and_data verifies ownership internally or we do it here first
+        # For consistency, let's verify ownership here before calling the service
+        project_repo = ProjectRepository(db)
+        project = project_repo.get_by_id(project_id)
+
+        if not project:
+            # Idempotency: If not found, treat as success (already deleted)
+            logger.info(f"Project {project_id} not found for deletion by user {current_user.email}. Assuming already deleted.")
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+        if project.user_email != current_user.email:
+            logger.warning(f"User {current_user.email} attempted to delete project {project_id} owned by {project.user_email}")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have permission to delete this project"
+            )
+
+        # Call the service function to perform the deletion
+        await delete_project_and_data(project_id=project_id, user_email=current_user.email, db=db) # Pass necessary info
+
+        logger.info(f"Project {project_id} and associated data successfully deleted by user {current_user.email}")
+        # Return 204 No Content on successful deletion
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    except HTTPException as e:
+        # Re-raise HTTP exceptions from the service or ownership check
+        raise e
+    except Exception as e:
+        # Log unexpected errors during deletion
+        logger.error(f"Error deleting project {project_id} for user {current_user.email}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while trying to delete the project."
+        )
 
 @app.get("/api/google/oauth/authorize", tags=["Google OAuth"])
 async def google_oauth_authorize(
