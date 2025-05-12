@@ -18,7 +18,7 @@ COPY . .
 # Expose the port the app runs on
 EXPOSE 8000
 
-# Command to run the application using Gunicorn with Uvicorn workers
+# Command to run the application using Gunicorn with Uvicorn workerss
 # The number of workers (--workers) can be tuned. A common recommendation is (2 * CPU_CORES) + 1.
 # --preload loads application code before workers are forked, saving memory.
-CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "main:app", "--timeout", "400", "--workers", "2", "--bind", "0.0.0.0:8000"]
+CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "main:app", "--timeout", "2000", "--workers", "2", "--bind", "0.0.0.0:8000"]
