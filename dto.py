@@ -103,6 +103,33 @@ class UpdateProjectDto(BaseDto):
     project_data: Optional[Dict[str, Any]] = None
     gsc_site_url: Optional[str] = None
 
+# --- Sub-models for Project Data Lists ---
+class ProductItem(BaseModel):
+    name: str
+    description: str
+    url: Optional[str] = None
+    priority: Optional[int] = None
+
+class PersonaItem(BaseModel):
+    name: str
+    description: str
+    priority: Optional[int] = None
+
+class CompetitorItem(BaseModel):
+    name: str
+    description: str
+# --- End Sub-models ---
+
+class UpdateProjectSpecificDto(BaseDto):
+    """DTO for updating specific, editable project fields, including list items."""
+    name: Optional[str] = None
+    target_market: Optional[str] = None
+    # Fields within project_data replace single descriptions with lists of items
+    # If a list is provided, it REPLACES the existing list for that key.
+    products: Optional[List[ProductItem]] = None
+    personas: Optional[List[PersonaItem]] = None
+    competitors: Optional[List[CompetitorItem]] = None
+
 # New DTOs for concurrency features
 
 class ConversationDto(BaseDto):

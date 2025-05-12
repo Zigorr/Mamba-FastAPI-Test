@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session # type: ignore # Add Session import
 from repositories import ProjectRepository, ConversationRepository, MessageRepository # Add repo imports
 from models import Project, Conversation, Message # Add model imports
 from fastapi import HTTPException, status # type: ignore # Add HTTPException
+from dto import UpdateProjectSpecificDto, ProjectDto # Import necessary DTOs
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,53 @@ async def delete_project_and_data(project_id: str, user_email: str, db: Session)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred while deleting project data: {e}"
+        )
+
+async def update_project_specific_fields(project_id: str, user_email: str, update_data: UpdateProjectSpecificDto, db: Session) -> ProjectDto:
+    """
+    Updates specific fields of a project after verifying ownership.
+    Handles partial updates based on the provided DTO.
+    """
+    project_repo = ProjectRepository(db)
+    project = project_repo.get_by_id(project_id)
+
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found"
+        )
+    
+    if project.user_email != user_email:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User not authorized to update this project"
+        )
+    
+    # Prepare updates dictionary, excluding None values from the DTO
+    updates_dict = update_data.model_dump(exclude_unset=True)
+    
+    if not updates_dict:
+        # If no actual update values were provided, return current state
+        logger.info(f"No update values provided for project {project_id} by user {user_email}. Returning current state.")
+        return project_repo.to_dto(project)
+
+    try:
+        # Apply the updates using the repository method
+        updated_project = project_repo.update_specific_fields(project, updates_dict)
+        
+        # Commit the changes (assuming session management handles commit/rollback on success/failure)
+        db.commit()
+        db.refresh(updated_project)
+        logger.info(f"Project {project_id} updated successfully by user {user_email}. Fields updated: {list(updates_dict.keys())}")
+        
+        return project_repo.to_dto(updated_project)
+    
+    except Exception as e:
+        db.rollback() # Explicit rollback on error within the service
+        logger.error(f"Error updating project {project_id} for user {user_email}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred while updating the project: {e}"
         )
 
 # Ensure necessary repository methods exist:

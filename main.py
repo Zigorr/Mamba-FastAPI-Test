@@ -32,7 +32,7 @@ from dto import (
     MessageDto, SendMessageDto, ConversationStateDto,
     UpdateConversationStateDto, RenameConversationDto,
     ProjectDto, CreateProjectDto, UpdateProjectDataDto,
-    UpdateProjectDto
+    UpdateProjectDto, UpdateProjectSpecificDto
 )
 from pydantic import BaseModel, Field # Add Field
 
@@ -48,7 +48,7 @@ from models import Base, User as UserModel # Alias User to UserModel
 from models import GoogleService as GoogleServiceModel # Added
 from repositories import ConversationRepository, MessageRepository, UserRepository, ProjectRepository
 from services.agency_services import AgencyService
-from services.project_services import extract_project_data, generate_project_data, delete_project_and_data
+from services.project_services import extract_project_data, generate_project_data, delete_project_and_data, update_project_specific_fields
 from services.google_oauth_service import GoogleOAuthService # Added
 from services.search_console_service import SearchConsoleService # Added
 from services.analytics_service import AnalyticsService # Added
@@ -898,48 +898,46 @@ async def get_project_details_endpoint(
 @app.patch("/projects/{project_id}", response_model=ProjectDto, tags=["Projects"])
 async def update_project_details_endpoint(
     project_id: str,
-    update_data: UpdateProjectDto, 
+    update_data: UpdateProjectSpecificDto, # Use the new DTO
     token: str = Depends(get_token_header),
     db: Session = Depends(get_db)
     # user_service: UserManagementService = Depends(get_user_service) # Removed
 ):
+    """Update specific details of a project (name, target_market, products, personas, competitors)."""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials for updating project",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    payload = auth.verify_token(token, credentials_exception) # Use auth.verify_token
-    user_email = payload.get("email") # Changed from "sub" to "email"
-    if not user_email:
+    try:
+        # Verify token first using auth.verify_token to get email efficiently
+        payload = auth.verify_token(token, credentials_exception)
+        user_email = payload.get("email")
+        if not user_email:
+            raise credentials_exception
+        logger.info(f"User {user_email} attempting to update project {project_id}")
+    except HTTPException as e:
         raise credentials_exception
 
-    project_repo = ProjectRepository(db)
-    
-    # Get project by ID
-    project = project_repo.get_by_id(project_id)
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found"
+    # Call the specific update service function
+    try:
+        updated_project_dto = await update_project_specific_fields(
+            project_id=project_id,
+            user_email=user_email,
+            update_data=update_data,
+            db=db
         )
-    
-    # Verify ownership
-    if project.user_email != user_email:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have access to this project"
-        )
-    
-    # Update project data
-    updated_project = project_repo.update_project_data(project_id, update_data.project_data)
-    if not updated_project:
+        return updated_project_dto
+    except HTTPException as e:
+        # Re-raise HTTP exceptions from the service layer (e.g., 404, 403, 500)
+        raise e
+    except Exception as e:
+        # Catch any unexpected errors from the service layer
+        logger.error(f"Unexpected error calling update_project_specific_fields for project {project_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update project data"
+            detail="An unexpected error occurred while updating the project."
         )
-    
-    # Return updated project as DTO
-    return project_repo.to_dto(updated_project)
 
 @app.get("/projects/{project_id}/conversations", tags=["Projects"])
 async def get_conversations_for_project(

@@ -168,6 +168,50 @@ class ProjectRepository(BaseRepository[Project]):
             # Re-raise or handle as appropriate for the service layer
             raise
 
+    def update_specific_fields(self, project: Project, updates: Dict[str, Any]) -> Project:
+        """Applies specific updates to a Project model instance.
+
+        Args:
+            project: The Project model instance to update.
+            updates: A dictionary containing the fields to update.
+                     Keys can include 'name' and keys meant for the 'project_data' JSON field
+                     (e.g., 'target_market', 'products_description').
+
+        Returns:
+            The updated Project model instance.
+        """
+        # project_data_keys should match the field names in UpdateProjectSpecificDto that go into project_data
+        project_data_keys = ["target_market", "products", "personas", "competitors"]
+        project_data_needs_update = False
+
+        # Ensure project_data is a dictionary if it's None
+        if project.project_data is None:
+            project.project_data = {}
+
+        for key, value in updates.items():
+            if value is None: # Skip fields explicitly set to None in the DTO
+                continue
+                
+            if key == 'name':
+                setattr(project, key, value)
+                logger.debug(f"Updating project {project.id} field '{key}' to '{value}'")
+            elif key in project_data_keys:
+                # Update nested key within project_data
+                if project.project_data.get(key) != value:
+                    project.project_data[key] = value
+                    project_data_needs_update = True
+                    logger.debug(f"Updating project {project.id} nested field 'project_data.{key}' to '{value}'")
+            # else: log unknown key?
+
+        # Mark the project_data field as modified if necessary
+        # This is important for SQLAlchemy to detect changes in mutable JSON types
+        if project_data_needs_update:
+            from sqlalchemy.orm.attributes import flag_modified # type: ignore
+            flag_modified(project, "project_data")
+            
+        # Note: Commit is NOT done here. Service layer handles the transaction.
+        return project
+
 class ConversationRepository(BaseRepository[Conversation]):
     """Repository for Conversation entity."""
     
