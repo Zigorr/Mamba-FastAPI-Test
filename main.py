@@ -1034,7 +1034,7 @@ async def delete_project_endpoint(
 
         logger.info(f"Project {project_id} and associated data successfully deleted by user {current_user.email}")
         # Return 204 No Content on successful deletion
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
+        return Response("deleted successfully", status_code=status.HTTP_200_OK)
 
     except HTTPException as e:
         # Re-raise HTTP exceptions from the service or ownership check
