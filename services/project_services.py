@@ -57,6 +57,15 @@ async def delete_project_and_data(project_id: str, user_email: str, db: Session)
             detail="User not authorized to delete this project"
         )
 
+    # Check if this is the user's last project
+    user_projects = project_repo.get_by_user_email(user_email)
+    if len(user_projects) == 1 and user_projects[0].id == project_id:
+        logger.warning(f"User {user_email} attempted to delete their last project {project_id}. Operation denied.")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot delete your last project. Please create a new project before deleting this one."
+        )
+
     try:
         # 1. Get all conversation IDs for the project
         conversation_ids = [conv.id for conv in conversation_repo.get_for_project_raw(project_id)]
