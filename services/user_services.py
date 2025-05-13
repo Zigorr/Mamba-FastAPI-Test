@@ -14,11 +14,12 @@ import string
 from zerobouncesdk import ZeroBounce, ZBException, ZBValidateStatus
 
 from database import get_db, get_valkey_connection
-from models import User
+from models import User, GoogleService
 from dto import UserDto, CreateUserDto, TokenData, LoginDto, ConversationDto
 from repositories import UserRepository, ConversationRepository, MessageRepository, ProjectRepository
 from auth import create_access_token
 from core.config import settings
+from services.google_oauth_service import GoogleOAuthService
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -200,6 +201,7 @@ async def _generate_auth_response(user: User, db: Session) -> dict:
     )
 
     project_repo = ProjectRepository(db)
+    oauth_service = GoogleOAuthService(db)
 
     # Get projects
     projects = project_repo.get_for_user(user.email)
@@ -211,6 +213,13 @@ async def _generate_auth_response(user: User, db: Session) -> dict:
             "website_url": project.website_url,
             "project_data": project.project_data
         })
+
+    # Check Google Service connection statuses
+    gsc_token = await oauth_service.get_valid_access_token(user.email, GoogleService.SEARCH_CONSOLE)
+    connected_to_search_console = bool(gsc_token)
+
+    ga4_token = await oauth_service.get_valid_access_token(user.email, GoogleService.GOOGLE_ANALYTICS_4)
+    connected_to_ga4 = bool(ga4_token)
 
     return {
         "access_token": access_token,
@@ -224,7 +233,9 @@ async def _generate_auth_response(user: User, db: Session) -> dict:
             "is_subscribed": user.is_subscribed,
             "email_verified": user.email_verified
         },
-        "projects": project_summaries
+        "projects": project_summaries,
+        "connected_to_search_console": connected_to_search_console,
+        "connected_to_ga4": connected_to_ga4
     }
 
 async def login_user(login_data: LoginDto, db: Session) -> dict:

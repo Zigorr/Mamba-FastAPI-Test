@@ -15,6 +15,8 @@ from repositories import GoogleOAuthTokenRepository
 # Assuming Valkey for state management, need to import get_valkey_connection
 from database import get_valkey_connection # Or however you get your Valkey/Redis connection
 
+logger = logging.getLogger(__name__)
+
 # Google OAuth2 Endpoints
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
