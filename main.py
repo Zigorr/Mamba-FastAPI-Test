@@ -32,7 +32,8 @@ from dto import (
     MessageDto, SendMessageDto, ConversationStateDto,
     UpdateConversationStateDto, RenameConversationDto,
     ProjectDto, CreateProjectDto, UpdateProjectDataDto,
-    UpdateProjectDto, UpdateProjectSpecificDto
+    UpdateProjectDto, UpdateProjectSpecificDto,
+    GoogleOAuthRevokeRequest # Added for revoke endpoint
 )
 from pydantic import BaseModel, Field # Add Field
 
@@ -1183,7 +1184,7 @@ async def build_authorization_url(
 
 @app.post("/api/google/oauth/revoke", tags=["Google OAuth"], status_code=status.HTTP_204_NO_CONTENT)
 async def google_oauth_revoke(
-    product: str, # Query parameter: "search_console" or "ga4"
+    revoke_data: GoogleOAuthRevokeRequest, # Changed from product: str
     db: Session = Depends(get_db),
     token: str = Depends(get_token_header) 
 ):
@@ -1199,7 +1200,7 @@ async def google_oauth_revoke(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not authenticated")
 
     try:
-        service_name_enum = GoogleServiceModel(product.lower())
+        service_name_enum = GoogleServiceModel(revoke_data.product.lower()) # Use revoke_data.product
     except ValueError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid product specified. Use 'search_console' or 'ga4'.")
 

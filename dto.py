@@ -251,3 +251,7 @@ class UpdateConversationStateDto(BaseDto):
 class RenameConversationDto(BaseDto):
     """DTO for renaming a conversation"""
     name: str 
+
+class GoogleOAuthRevokeRequest(BaseModel):
+    """DTO for Google OAuth revoke request"""
+    product: str 
