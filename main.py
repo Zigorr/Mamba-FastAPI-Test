@@ -1213,7 +1213,7 @@ async def google_oauth_revoke(
     if not revoked:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to revoke Google token properly. Please try again or contact support if the issue persists.")
     
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return Response("Token revoked successfully", status_code=status.HTTP_200_OK)
 
 @app.get("/api/search-console/sites", tags=["Google Search Console"])
 async def list_search_console_sites(
